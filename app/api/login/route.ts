@@ -25,10 +25,6 @@ export async function POST(request: Request) {
       process.env.SUPABASE_SECRET_KEY
 
     if (!supabaseUrl || !supabaseSecret) {
-      console.error(
-        "Faltan variables de Supabase en renacli-credencial"
-      )
-
       return NextResponse.json(
         {
           ok: false,
@@ -60,7 +56,7 @@ export async function POST(request: Request) {
 
     if (error) {
       console.error(
-        "Error verificando acceso del técnico:",
+        "Error verificando acceso:",
         error
       )
 
@@ -93,12 +89,59 @@ export async function POST(request: Request) {
       )
     }
 
+    const { data: matriculado, error: errorMatriculado } =
+      await supabase
+        .from("matriculados")
+        .select(`
+          id,
+          numero_matricula,
+          apellido_nombre,
+          acepta_reglamento,
+          acepta_privacidad,
+          autoriza_publicacion,
+          fecha_aceptacion_terminos,
+          version_reglamento,
+          version_privacidad
+        `)
+        .eq("id", resultado.matriculado_id)
+        .single()
+
+    if (errorMatriculado || !matriculado) {
+      console.error(
+        "Error leyendo consentimiento:",
+        errorMatriculado
+      )
+
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo consultar el estado del técnico.",
+        },
+        { status: 500 }
+      )
+    }
+
+    const consentimientoAceptado =
+      matriculado.acepta_reglamento === true &&
+      matriculado.acepta_privacidad === true &&
+      Boolean(
+        matriculado.fecha_aceptacion_terminos
+      ) &&
+      Boolean(matriculado.version_reglamento) &&
+      Boolean(matriculado.version_privacidad)
+
     return NextResponse.json({
       ok: true,
       tecnico: {
-        id: resultado.matriculado_id,
-        matricula: resultado.numero_matricula,
-        nombre: resultado.apellido_nombre,
+        id: matriculado.id,
+        matricula: matriculado.numero_matricula,
+        nombre: matriculado.apellido_nombre,
+      },
+      consentimiento: {
+        aceptado: consentimientoAceptado,
+        autoriza_publicacion:
+          matriculado.autoriza_publicacion === true,
       },
     })
   } catch (error) {
