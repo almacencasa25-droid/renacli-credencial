@@ -131,7 +131,7 @@ export default function HomePage() {
               fontSize: "14px",
             }}
           >
-            Credencial Digital del Técnico
+            Credencial Digital del Técnico RENACLI
           </p>
         </div>
 
