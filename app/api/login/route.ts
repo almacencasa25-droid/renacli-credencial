@@ -4,10 +4,11 @@ import { createHmac } from "crypto"
 
 function crearFirma(
   matriculadoId: number,
+  dispositivoId: string,
   secreto: string
 ) {
   return createHmac("sha256", secreto)
-    .update(String(matriculadoId))
+    .update(`${matriculadoId}:${dispositivoId}`)
     .digest("hex")
 }
 
@@ -23,12 +24,30 @@ export async function POST(request: Request) {
       body.clave ?? ""
     ).trim()
 
+    const dispositivoId = String(
+      body.dispositivoId ?? ""
+    ).trim()
+
     if (!matricula || !clave) {
       return NextResponse.json(
         {
           ok: false,
           mensaje:
             "Ingresá matrícula y clave.",
+        },
+        { status: 400 }
+      )
+    }
+
+    if (
+      !dispositivoId ||
+      dispositivoId.length < 8
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo identificar este dispositivo.",
         },
         { status: 400 }
       )
@@ -62,6 +81,9 @@ export async function POST(request: Request) {
       }
     )
 
+    /*
+     * Primero verificamos matrícula y clave.
+     */
     const {
       data,
       error,
@@ -109,6 +131,81 @@ export async function POST(request: Request) {
       )
     }
 
+    const matriculadoId =
+      Number(resultado.matriculado_id)
+
+    if (
+      !Number.isInteger(matriculadoId) ||
+      matriculadoId <= 0
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo identificar al técnico.",
+        },
+        { status: 500 }
+      )
+    }
+
+    /*
+     * Ahora comprobamos el teléfono.
+     *
+     * Primer ingreso:
+     * se vincula este dispositivo.
+     *
+     * Mismo teléfono:
+     * permite continuar.
+     *
+     * Otro teléfono:
+     * devuelve false.
+     */
+    const {
+      data: dispositivoPermitido,
+      error: errorDispositivo,
+    } = await supabase.rpc(
+      "vincular_dispositivo_app_tecnico",
+      {
+        p_matriculado_id:
+          matriculadoId,
+
+        p_dispositivo_id:
+          dispositivoId,
+      }
+    )
+
+    if (errorDispositivo) {
+      console.error(
+        "Error vinculando dispositivo:",
+        errorDispositivo
+      )
+
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo verificar el dispositivo.",
+        },
+        { status: 500 }
+      )
+    }
+
+    if (dispositivoPermitido !== true) {
+      return NextResponse.json(
+        {
+          ok: false,
+          codigo:
+            "DISPOSITIVO_NO_AUTORIZADO",
+          mensaje:
+            "Esta credencial ya se encuentra vinculada a otro dispositivo. Para utilizarla en un nuevo teléfono deberá solicitar la desvinculación a RENACLI.",
+        },
+        { status: 403 }
+      )
+    }
+
+    /*
+     * Consultamos los datos de la credencial.
+     */
     const {
       data: matriculado,
       error: errorMatriculado,
@@ -135,7 +232,7 @@ export async function POST(request: Request) {
       `)
       .eq(
         "id",
-        resultado.matriculado_id
+        matriculadoId
       )
       .single()
 
@@ -205,16 +302,19 @@ export async function POST(request: Request) {
       )
 
     /*
-     * Creamos una sesión persistente.
-     * NO guardamos la contraseña.
+     * Creamos una sesión firmada
+     * vinculada también a este dispositivo.
+     *
+     * La contraseña NO se guarda.
      */
     const firma = crearFirma(
       matriculado.id,
+      dispositivoId,
       supabaseSecret
     )
 
     const token =
-      `${matriculado.id}.${firma}`
+      `${matriculado.id}.${dispositivoId}.${firma}`
 
     const respuesta =
       NextResponse.json({
@@ -275,16 +375,15 @@ export async function POST(request: Request) {
       token,
       {
         httpOnly: true,
+
         secure:
           process.env.NODE_ENV ===
           "production",
+
         sameSite: "strict",
+
         path: "/",
 
-        /*
-         * La sesión puede permanecer
-         * hasta un año.
-         */
         maxAge:
           60 * 60 * 24 * 365,
       }
