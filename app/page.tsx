@@ -3,7 +3,6 @@
 import {
   FormEvent,
   UIEvent,
-  useEffect,
   useState,
 } from "react"
 
@@ -193,6 +192,7 @@ export default function HomePage() {
   const [matricula, setMatricula] = useState("")
   const [clave, setClave] = useState("")
   const [cargando, setCargando] = useState(false)
+  const [guardando, setGuardando] = useState(false)
 
   const [mensaje, setMensaje] = useState("")
   const [tipoMensaje, setTipoMensaje] = useState<
@@ -227,28 +227,8 @@ export default function HomePage() {
     setAceptaPrivacidad,
   ] = useState(false)
 
-  const [
-    pasoPublicacion,
-    setPasoPublicacion,
-  ] = useState(false)
-
-  useEffect(() => {
-    if (
-      requiereConsentimiento &&
-      aceptaReglamento &&
-      aceptaPrivacidad
-    ) {
-      const timer = window.setTimeout(() => {
-        setPasoPublicacion(true)
-      }, 500)
-
-      return () => window.clearTimeout(timer)
-    }
-  }, [
-    requiereConsentimiento,
-    aceptaReglamento,
-    aceptaPrivacidad,
-  ])
+  const [consentimientoGuardado, setConsentimientoGuardado] =
+    useState(false)
 
   function detectarFinal(
     event: UIEvent<HTMLDivElement>,
@@ -257,8 +237,7 @@ export default function HomePage() {
     const elemento = event.currentTarget
 
     const llego =
-      elemento.scrollTop +
-        elemento.clientHeight >=
+      elemento.scrollTop + elemento.clientHeight >=
       elemento.scrollHeight - 8
 
     if (!llego) return
@@ -280,20 +259,16 @@ export default function HomePage() {
     setTipoMensaje("")
 
     try {
-      const respuesta = await fetch(
-        "/api/login",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            matricula,
-            clave,
-          }),
-        }
-      )
+      const respuesta = await fetch("/api/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          matricula,
+          clave,
+        }),
+      })
 
       const resultado: ResultadoLogin =
         await respuesta.json()
@@ -310,19 +285,13 @@ export default function HomePage() {
       setTecnico(resultado.tecnico)
 
       if (
-        resultado.consentimiento
-          ?.aceptado !== true
+        resultado.consentimiento?.aceptado !== true
       ) {
         setRequiereConsentimiento(true)
         return
       }
 
-      setTipoMensaje("ok")
-      setMensaje(
-        `Acceso correcto. Bienvenido ${
-          resultado.tecnico?.nombre ?? ""
-        }`
-      )
+      setConsentimientoGuardado(true)
     } catch {
       setTipoMensaje("error")
       setMensaje(
@@ -333,15 +302,67 @@ export default function HomePage() {
     }
   }
 
+  async function aceptarYContinuar() {
+    if (
+      !tecnico ||
+      !aceptaReglamento ||
+      !aceptaPrivacidad
+    ) {
+      return
+    }
+
+    setGuardando(true)
+    setMensaje("")
+
+    try {
+      const respuesta = await fetch(
+        "/api/consentimiento",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            matriculadoId: tecnico.id,
+            autorizaPublicacion: true,
+          }),
+        }
+      )
+
+      const resultado = await respuesta.json()
+
+      if (!respuesta.ok || !resultado.ok) {
+        setMensaje(
+          resultado.mensaje ??
+            "No se pudo guardar la aceptación."
+        )
+        setTipoMensaje("error")
+        return
+      }
+
+      setRequiereConsentimiento(false)
+      setConsentimientoGuardado(true)
+    } catch {
+      setMensaje(
+        "No se pudo guardar la aceptación."
+      )
+      setTipoMensaje("error")
+    } finally {
+      setGuardando(false)
+    }
+  }
+
   if (
-    requiereConsentimiento &&
-    tecnico &&
-    pasoPublicacion
+    consentimientoGuardado &&
+    tecnico
   ) {
     return (
       <main
         style={{
           minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           padding: "24px",
           background: "#f4f7fb",
         }}
@@ -349,115 +370,70 @@ export default function HomePage() {
         <section
           style={{
             width: "100%",
-            maxWidth: "620px",
-            margin: "30px auto",
+            maxWidth: "500px",
             background: "white",
             borderRadius: "22px",
-            padding: "28px",
+            padding: "30px",
+            textAlign: "center",
             boxShadow:
               "0 20px 60px rgba(15,23,42,0.12)",
           }}
         >
           <div
             style={{
-              textAlign: "center",
+              fontSize: "42px",
             }}
           >
-            <div
-              style={{
-                fontSize: "36px",
-              }}
-            >
-              ❄
-            </div>
-
-            <h1>RENACLI</h1>
-
-            <p
-              style={{
-                color: "#64748b",
-              }}
-            >
-              Autorización de publicación
-            </p>
+            ❄
           </div>
+
+          <h1
+            style={{
+              marginBottom: "8px",
+            }}
+          >
+            RENACLI
+          </h1>
 
           <div
             style={{
-              marginTop: "22px",
-              padding: "16px",
-              borderRadius: "12px",
-              background: "#eff6ff",
-            }}
-          >
-            <strong>
-              {tecnico.nombre}
-            </strong>
-
-            <div>
-              Matrícula:{" "}
-              {tecnico.matricula}
-            </div>
-          </div>
-
-          <div
-            style={{
-              marginTop: "24px",
+              marginTop: "20px",
               padding: "18px",
-              border:
-                "1px solid #cbd5e1",
               borderRadius: "12px",
-              lineHeight: 1.6,
+              background: "#dcfce7",
+              color: "#166534",
+              fontWeight: "bold",
             }}
           >
-            <strong>
-              Reglamento aceptado ✓
-            </strong>
-
-            <br />
-
-            <strong>
-              Política de Privacidad
-              aceptada ✓
-            </strong>
+            Acceso habilitado correctamente
           </div>
 
           <h2
             style={{
-              marginTop: "26px",
+              marginTop: "24px",
             }}
           >
-            Publicación de datos
+            {tecnico.nombre}
           </h2>
 
           <p
             style={{
-              lineHeight: 1.6,
-              color: "#475569",
+              color: "#64748b",
             }}
           >
-            En el siguiente paso vas a
-            decidir expresamente si
-            autorizás la publicación de
-            los datos previstos para la
-            verificación pública de tu
-            matrícula.
+            Matrícula {tecnico.matricula}
           </p>
 
-          <div
+          <p
             style={{
-              padding: "14px",
-              marginTop: "18px",
-              background: "#fffbeb",
-              color: "#92400e",
-              borderRadius: "10px",
+              marginTop: "24px",
+              color: "#475569",
+              lineHeight: 1.6,
             }}
           >
-            Esta autorización será una
-            decisión independiente de la
-            aceptación del Reglamento y
-            de la Política de Privacidad.
-          </div>
+            En el próximo paso mostraremos aquí
+            tu Credencial Digital RENACLI.
+          </p>
         </section>
       </main>
     )
@@ -467,6 +443,10 @@ export default function HomePage() {
     requiereConsentimiento &&
     tecnico
   ) {
+    const puedeContinuar =
+      aceptaReglamento &&
+      aceptaPrivacidad
+
     return (
       <main
         style={{
@@ -501,21 +481,15 @@ export default function HomePage() {
               ❄
             </div>
 
-            <h1
-              style={{
-                marginBottom: "4px",
-              }}
-            >
-              RENACLI
-            </h1>
+            <h1>RENACLI</h1>
 
-            <span
+            <p
               style={{
                 color: "#64748b",
               }}
             >
               Primer ingreso
-            </span>
+            </p>
           </div>
 
           <div
@@ -531,8 +505,7 @@ export default function HomePage() {
             </strong>
 
             <div>
-              Matrícula:{" "}
-              {tecnico.matricula}
+              Matrícula: {tecnico.matricula}
             </div>
           </div>
 
@@ -693,27 +666,79 @@ export default function HomePage() {
             />
 
             Acepto la Política de
-            Privacidad RENACLI versión
-            1.0
+            Privacidad RENACLI versión 1.0
           </label>
 
-          {aceptaReglamento &&
-            aceptaPrivacidad && (
+          {puedeContinuar && (
+            <div
+              style={{
+                marginTop: "24px",
+              }}
+            >
               <div
                 style={{
-                  marginTop: "20px",
                   padding: "14px",
-                  textAlign: "center",
+                  marginBottom: "14px",
+                  background: "#eff6ff",
                   borderRadius: "10px",
-                  background: "#dcfce7",
-                  color: "#166534",
-                  fontWeight: "bold",
+                  color: "#334155",
+                  fontSize: "13px",
+                  lineHeight: 1.55,
                 }}
               >
-                Documentos aceptados.
-                Continuando...
+                Al continuar, autorizás la
+                publicación de los datos
+                necesarios para la
+                identificación y verificación
+                pública de tu matrícula
+                RENACLI, conforme la Política
+                de Privacidad aceptada.
               </div>
-            )}
+
+              <button
+                type="button"
+                onClick={
+                  aceptarYContinuar
+                }
+                disabled={guardando}
+                style={{
+                  width: "100%",
+                  padding: "15px",
+                  border: 0,
+                  borderRadius: "11px",
+                  background: guardando
+                    ? "#94a3b8"
+                    : "#075985",
+                  color: "white",
+                  fontWeight: "bold",
+                  fontSize: "16px",
+                  cursor: guardando
+                    ? "not-allowed"
+                    : "pointer",
+                }}
+              >
+                {guardando
+                  ? "Guardando aceptación..."
+                  : "ACEPTO Y CONTINUAR"}
+              </button>
+            </div>
+          )}
+
+          {mensaje && (
+            <div
+              style={{
+                marginTop: "16px",
+                padding: "12px",
+                borderRadius: "10px",
+                background: "#fee2e2",
+                color: "#991b1b",
+                textAlign: "center",
+                fontWeight: "bold",
+              }}
+            >
+              {mensaje}
+            </div>
+          )}
         </section>
       </main>
     )
@@ -763,8 +788,7 @@ export default function HomePage() {
               color: "#64748b",
             }}
           >
-            Credencial Digital del
-            Técnico RENACLI
+            Credencial Digital del Técnico RENACLI
           </p>
         </div>
 
