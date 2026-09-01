@@ -1,18 +1,34 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { createHmac } from "crypto"
+
+function crearFirma(
+  matriculadoId: number,
+  secreto: string
+) {
+  return createHmac("sha256", secreto)
+    .update(String(matriculadoId))
+    .digest("hex")
+}
 
 export async function POST(request: Request) {
   try {
     const body = await request.json()
 
-    const matricula = String(body.matricula ?? "").trim()
-    const clave = String(body.clave ?? "").trim()
+    const matricula = String(
+      body.matricula ?? ""
+    ).trim()
+
+    const clave = String(
+      body.clave ?? ""
+    ).trim()
 
     if (!matricula || !clave) {
       return NextResponse.json(
         {
           ok: false,
-          mensaje: "Ingresá matrícula y clave.",
+          mensaje:
+            "Ingresá matrícula y clave.",
         },
         { status: 400 }
       )
@@ -46,10 +62,10 @@ export async function POST(request: Request) {
       }
     )
 
-    /*
-     * 1. Verificamos matrícula y clave.
-     */
-    const { data, error } = await supabase.rpc(
+    const {
+      data,
+      error,
+    } = await supabase.rpc(
       "verificar_acceso_app_tecnico",
       {
         p_numero_matricula: matricula,
@@ -74,7 +90,8 @@ export async function POST(request: Request) {
     }
 
     const resultado =
-      Array.isArray(data) && data.length > 0
+      Array.isArray(data) &&
+      data.length > 0
         ? data[0]
         : null
 
@@ -92,9 +109,6 @@ export async function POST(request: Request) {
       )
     }
 
-    /*
-     * 2. Obtenemos los datos reales del técnico.
-     */
     const {
       data: matriculado,
       error: errorMatriculado,
@@ -144,10 +158,6 @@ export async function POST(request: Request) {
       )
     }
 
-    /*
-     * 3. Obtenemos el código QR actual
-     *    de RENACLI.
-     */
     const {
       data: codigoData,
       error: errorCodigo,
@@ -178,10 +188,6 @@ export async function POST(request: Request) {
         ? `https://renacli-web.vercel.app/verificar/${codigoVerificacion}`
         : null
 
-    /*
-     * 4. Comprobamos si ya aceptó
-     *    Reglamento y Privacidad.
-     */
     const consentimientoAceptado =
       matriculado.acepta_reglamento ===
         true &&
@@ -199,62 +205,92 @@ export async function POST(request: Request) {
       )
 
     /*
-     * 5. Devolvemos solamente la
-     *    información necesaria para
-     *    la Credencial Digital.
+     * Creamos una sesión persistente.
+     * NO guardamos la contraseña.
      */
-    return NextResponse.json({
-      ok: true,
+    const firma = crearFirma(
+      matriculado.id,
+      supabaseSecret
+    )
 
-      tecnico: {
-        id: matriculado.id,
+    const token =
+      `${matriculado.id}.${firma}`
 
-        matricula:
-          matriculado.numero_matricula,
+    const respuesta =
+      NextResponse.json({
+        ok: true,
 
-        nombre:
-          matriculado.apellido_nombre,
+        tecnico: {
+          id: matriculado.id,
 
-        foto:
-          matriculado.foto_url,
+          matricula:
+            matriculado.numero_matricula,
 
-        estado:
-          matriculado.estado ||
-          "vigente",
+          nombre:
+            matriculado.apellido_nombre,
 
-        especialidad:
-          matriculado.especialidad,
+          foto:
+            matriculado.foto_url,
 
-        localidad:
-          matriculado.localidad,
+          estado:
+            matriculado.estado ||
+            "vigente",
 
-        provincia:
-          matriculado.provincia,
+          especialidad:
+            matriculado.especialidad,
 
-        telefono:
-          matriculado.telefono,
+          localidad:
+            matriculado.localidad,
 
-        fechaEmision:
-          matriculado.fecha_emision,
+          provincia:
+            matriculado.provincia,
 
-        fechaVencimiento:
-          matriculado.fecha_vencimiento,
+          telefono:
+            matriculado.telefono,
 
-        codigoVerificacion,
+          fechaEmision:
+            matriculado.fecha_emision,
 
-        urlVerificacion,
-      },
+          fechaVencimiento:
+            matriculado.fecha_vencimiento,
 
-      consentimiento: {
-        aceptado:
-          consentimientoAceptado,
+          codigoVerificacion,
 
-        autoriza_publicacion:
-          matriculado
-            .autoriza_publicacion ===
-          true,
-      },
-    })
+          urlVerificacion,
+        },
+
+        consentimiento: {
+          aceptado:
+            consentimientoAceptado,
+
+          autoriza_publicacion:
+            matriculado
+              .autoriza_publicacion ===
+            true,
+        },
+      })
+
+    respuesta.cookies.set(
+      "renacli_credencial_session",
+      token,
+      {
+        httpOnly: true,
+        secure:
+          process.env.NODE_ENV ===
+          "production",
+        sameSite: "strict",
+        path: "/",
+
+        /*
+         * La sesión puede permanecer
+         * hasta un año.
+         */
+        maxAge:
+          60 * 60 * 24 * 365,
+      }
+    )
+
+    return respuesta
   } catch (error) {
     console.error(
       "Error inesperado en login:",
