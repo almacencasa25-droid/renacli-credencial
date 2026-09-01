@@ -6,7 +6,7 @@ import {
   timingSafeEqual,
 } from "crypto"
 
-function crearFirma(
+function crearFirmaAntigua(
   matriculadoId: number,
   secreto: string
 ) {
@@ -15,16 +15,22 @@ function crearFirma(
     .digest("hex")
 }
 
-function firmaValida(
+function crearFirmaNueva(
   matriculadoId: number,
-  firmaRecibida: string,
+  dispositivoId: string,
   secreto: string
 ) {
-  const firmaCorrecta = crearFirma(
-    matriculadoId,
-    secreto
-  )
+  return createHmac("sha256", secreto)
+    .update(
+      `${matriculadoId}:${dispositivoId}`
+    )
+    .digest("hex")
+}
 
+function compararFirmas(
+  firmaRecibida: string,
+  firmaCorrecta: string
+) {
   try {
     const recibida = Buffer.from(
       firmaRecibida,
@@ -52,7 +58,40 @@ function firmaValida(
   }
 }
 
-export async function GET() {
+function eliminarSesion(
+  mensaje?: string
+) {
+  const respuesta =
+    NextResponse.json({
+      ok: true,
+      sesion: false,
+      mensaje,
+    })
+
+  respuesta.cookies.set(
+    "renacli_credencial_session",
+    "",
+    {
+      httpOnly: true,
+
+      secure:
+        process.env.NODE_ENV ===
+        "production",
+
+      sameSite: "strict",
+
+      path: "/",
+
+      maxAge: 0,
+    }
+  )
+
+  return respuesta
+}
+
+export async function GET(
+  request: Request
+) {
   try {
     const supabaseUrl =
       process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -60,7 +99,10 @@ export async function GET() {
     const supabaseSecret =
       process.env.SUPABASE_SECRET_KEY
 
-    if (!supabaseUrl || !supabaseSecret) {
+    if (
+      !supabaseUrl ||
+      !supabaseSecret
+    ) {
       return NextResponse.json(
         {
           ok: false,
@@ -69,6 +111,26 @@ export async function GET() {
             "La aplicación no está configurada correctamente.",
         },
         { status: 500 }
+      )
+    }
+
+    /*
+     * El identificador lo envía la app
+     * desde el navegador actual.
+     */
+    const dispositivoId =
+      String(
+        request.headers.get(
+          "x-renacli-device-id"
+        ) ?? ""
+      ).trim()
+
+    if (
+      !dispositivoId ||
+      dispositivoId.length < 8
+    ) {
+      return eliminarSesion(
+        "No se pudo identificar este dispositivo."
       )
     }
 
@@ -90,15 +152,28 @@ export async function GET() {
     const partes =
       token.split(".")
 
-    if (partes.length !== 2) {
+    /*
+     * Admitimos temporalmente dos
+     * formatos:
+     *
+     * ANTIGUO:
+     * id.firma
+     *
+     * NUEVO:
+     * id.dispositivo.firma
+     *
+     * Así podemos migrar la sesión
+     * que ya estaba abierta.
+     */
+    if (
+      partes.length !== 2 &&
+      partes.length !== 3
+    ) {
       return eliminarSesion()
     }
 
     const matriculadoId =
       Number(partes[0])
-
-    const firma =
-      partes[1]
 
     if (
       !Number.isInteger(
@@ -109,14 +184,72 @@ export async function GET() {
       return eliminarSesion()
     }
 
-    if (
-      !firmaValida(
-        matriculadoId,
-        firma,
-        supabaseSecret
-      )
-    ) {
-      return eliminarSesion()
+    let necesitaMigracion =
+      false
+
+    /*
+     * SESIÓN ANTIGUA
+     */
+    if (partes.length === 2) {
+      const firmaRecibida =
+        partes[1]
+
+      const firmaCorrecta =
+        crearFirmaAntigua(
+          matriculadoId,
+          supabaseSecret
+        )
+
+      if (
+        !compararFirmas(
+          firmaRecibida,
+          firmaCorrecta
+        )
+      ) {
+        return eliminarSesion()
+      }
+
+      necesitaMigracion = true
+    }
+
+    /*
+     * SESIÓN NUEVA
+     */
+    if (partes.length === 3) {
+      const dispositivoGuardado =
+        partes[1]
+
+      const firmaRecibida =
+        partes[2]
+
+      /*
+       * La sesión pertenece a otro
+       * dispositivo.
+       */
+      if (
+        dispositivoGuardado !==
+        dispositivoId
+      ) {
+        return eliminarSesion(
+          "Esta sesión no pertenece a este dispositivo."
+        )
+      }
+
+      const firmaCorrecta =
+        crearFirmaNueva(
+          matriculadoId,
+          dispositivoGuardado,
+          supabaseSecret
+        )
+
+      if (
+        !compararFirmas(
+          firmaRecibida,
+          firmaCorrecta
+        )
+      ) {
+        return eliminarSesion()
+      }
     }
 
     const supabase = createClient(
@@ -129,6 +262,47 @@ export async function GET() {
         },
       }
     )
+
+    /*
+     * Comprobamos siempre contra
+     * Supabase que este sea el
+     * teléfono vinculado.
+     *
+     * Si todavía no hay ninguno,
+     * este queda vinculado.
+     */
+    const {
+      data: dispositivoPermitido,
+      error: errorDispositivo,
+    } = await supabase.rpc(
+      "vincular_dispositivo_app_tecnico",
+      {
+        p_matriculado_id:
+          matriculadoId,
+
+        p_dispositivo_id:
+          dispositivoId,
+      }
+    )
+
+    if (errorDispositivo) {
+      console.error(
+        "Error verificando dispositivo de sesión:",
+        errorDispositivo
+      )
+
+      return eliminarSesion(
+        "No se pudo verificar el dispositivo."
+      )
+    }
+
+    if (
+      dispositivoPermitido !== true
+    ) {
+      return eliminarSesion(
+        "Esta credencial está vinculada a otro dispositivo."
+      )
+    }
 
     const {
       data: matriculado,
@@ -220,62 +394,102 @@ export async function GET() {
           .version_privacidad
       )
 
-    return NextResponse.json({
-      ok: true,
-      sesion: true,
+    const respuesta =
+      NextResponse.json({
+        ok: true,
+        sesion: true,
 
-      tecnico: {
-        id:
-          matriculado.id,
+        tecnico: {
+          id:
+            matriculado.id,
 
-        matricula:
-          matriculado
-            .numero_matricula,
+          matricula:
+            matriculado
+              .numero_matricula,
 
-        nombre:
-          matriculado
-            .apellido_nombre,
+          nombre:
+            matriculado
+              .apellido_nombre,
 
-        foto:
-          matriculado.foto_url,
+          foto:
+            matriculado.foto_url,
 
-        estado:
-          matriculado.estado ||
-          "vigente",
+          estado:
+            matriculado.estado ||
+            "vigente",
 
-        especialidad:
-          matriculado.especialidad,
+          especialidad:
+            matriculado.especialidad,
 
-        localidad:
-          matriculado.localidad,
+          localidad:
+            matriculado.localidad,
 
-        provincia:
-          matriculado.provincia,
+          provincia:
+            matriculado.provincia,
 
-        telefono:
-          matriculado.telefono,
+          telefono:
+            matriculado.telefono,
 
-        fechaEmision:
-          matriculado.fecha_emision,
+          fechaEmision:
+            matriculado.fecha_emision,
 
-        fechaVencimiento:
-          matriculado.fecha_vencimiento,
+          fechaVencimiento:
+            matriculado.fecha_vencimiento,
 
-        codigoVerificacion,
+          codigoVerificacion,
 
-        urlVerificacion,
-      },
+          urlVerificacion,
+        },
 
-      consentimiento: {
-        aceptado:
-          consentimientoAceptado,
+        consentimiento: {
+          aceptado:
+            consentimientoAceptado,
 
-        autoriza_publicacion:
-          matriculado
-            .autoriza_publicacion ===
-          true,
-      },
-    })
+          autoriza_publicacion:
+            matriculado
+              .autoriza_publicacion ===
+            true,
+        },
+      })
+
+    /*
+     * Si veníamos de la sesión antigua,
+     * la reemplazamos automáticamente
+     * por una sesión vinculada al
+     * dispositivo actual.
+     */
+    if (necesitaMigracion) {
+      const firmaNueva =
+        crearFirmaNueva(
+          matriculadoId,
+          dispositivoId,
+          supabaseSecret
+        )
+
+      const tokenNuevo =
+        `${matriculadoId}.${dispositivoId}.${firmaNueva}`
+
+      respuesta.cookies.set(
+        "renacli_credencial_session",
+        tokenNuevo,
+        {
+          httpOnly: true,
+
+          secure:
+            process.env.NODE_ENV ===
+            "production",
+
+          sameSite: "strict",
+
+          path: "/",
+
+          maxAge:
+            60 * 60 * 24 * 365,
+        }
+      )
+    }
+
+    return respuesta
   } catch (error) {
     console.error(
       "Error comprobando sesión:",
@@ -292,28 +506,4 @@ export async function GET() {
       { status: 500 }
     )
   }
-}
-
-function eliminarSesion() {
-  const respuesta =
-    NextResponse.json({
-      ok: true,
-      sesion: false,
-    })
-
-  respuesta.cookies.set(
-    "renacli_credencial_session",
-    "",
-    {
-      httpOnly: true,
-      secure:
-        process.env.NODE_ENV ===
-        "production",
-      sameSite: "strict",
-      path: "/",
-      maxAge: 0,
-    }
-  )
-
-  return respuesta
 }
