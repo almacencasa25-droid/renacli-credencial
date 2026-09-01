@@ -5,18 +5,38 @@ export async function POST(request: Request) {
   try {
     const body = await request.json()
 
-    const matriculadoId = Number(body.matriculadoId)
+    const matricula = String(body.matricula ?? "").trim()
+    const clave = String(body.clave ?? "").trim()
+
+    const aceptaReglamento =
+      body.aceptaReglamento === true
+
+    const aceptaPrivacidad =
+      body.aceptaPrivacidad === true
+
     const autorizaPublicacion =
       body.autorizaPublicacion === true
 
+    if (!matricula || !clave) {
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo validar la identidad del técnico.",
+        },
+        { status: 400 }
+      )
+    }
+
     if (
-      !Number.isInteger(matriculadoId) ||
-      matriculadoId <= 0
+      !aceptaReglamento ||
+      !aceptaPrivacidad
     ) {
       return NextResponse.json(
         {
           ok: false,
-          mensaje: "Técnico inválido.",
+          mensaje:
+            "Debés aceptar el Reglamento y la Política de Privacidad.",
         },
         { status: 400 }
       )
@@ -50,24 +70,110 @@ export async function POST(request: Request) {
       }
     )
 
-    const { error } = await supabase.rpc(
-      "registrar_consentimiento_tecnico",
+    /*
+     * 1. Volvemos a comprobar
+     *    matrícula y clave.
+     */
+    const {
+      data: accesoData,
+      error: accesoError,
+    } = await supabase.rpc(
+      "verificar_acceso_app_tecnico",
       {
-        p_matriculado_id: matriculadoId,
-        p_acepta_reglamento: true,
-        p_acepta_privacidad: true,
-        p_autoriza_publicacion:
-          autorizaPublicacion,
-        p_version_reglamento: "1.0",
-        p_version_privacidad: "1.0",
-        p_dispositivo_id: null,
+        p_numero_matricula: matricula,
+        p_clave: clave,
       }
     )
 
-    if (error) {
+    if (accesoError) {
+      console.error(
+        "Error verificando acceso para consentimiento:",
+        accesoError
+      )
+
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo verificar la identidad del técnico.",
+        },
+        { status: 500 }
+      )
+    }
+
+    const acceso =
+      Array.isArray(accesoData) &&
+      accesoData.length > 0
+        ? accesoData[0]
+        : null
+
+    if (
+      !acceso ||
+      acceso.acceso_valido !== true ||
+      !acceso.matriculado_id
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "Matrícula o clave incorrecta.",
+        },
+        { status: 401 }
+      )
+    }
+
+    const matriculadoId =
+      Number(acceso.matriculado_id)
+
+    if (
+      !Number.isInteger(matriculadoId) ||
+      matriculadoId <= 0
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo identificar al técnico.",
+        },
+        { status: 500 }
+      )
+    }
+
+    /*
+     * 2. Guardamos la aceptación.
+     */
+    const {
+      error: consentimientoError,
+    } = await supabase.rpc(
+      "registrar_consentimiento_tecnico",
+      {
+        p_matriculado_id:
+          matriculadoId,
+
+        p_acepta_reglamento:
+          aceptaReglamento,
+
+        p_acepta_privacidad:
+          aceptaPrivacidad,
+
+        p_autoriza_publicacion:
+          autorizaPublicacion,
+
+        p_version_reglamento:
+          "1.0",
+
+        p_version_privacidad:
+          "1.0",
+
+        p_dispositivo_id:
+          null,
+      }
+    )
+
+    if (consentimientoError) {
       console.error(
         "Error registrando consentimiento:",
-        error
+        consentimientoError
       )
 
       return NextResponse.json(
