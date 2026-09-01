@@ -28,6 +28,7 @@ type Tecnico = {
 type ResultadoLogin = {
   ok: boolean
   mensaje?: string
+  sesion?: boolean
 
   tecnico?: Tecnico
 
@@ -254,6 +255,11 @@ export default function HomePage() {
   const [cargando, setCargando] = useState(false)
   const [guardando, setGuardando] = useState(false)
 
+  const [
+    comprobandoSesion,
+    setComprobandoSesion,
+  ] = useState(true)
+
   const [mensaje, setMensaje] = useState("")
   const [tipoMensaje, setTipoMensaje] = useState<
     "ok" | "error" | ""
@@ -298,6 +304,51 @@ export default function HomePage() {
     new Date()
   )
 
+  /*
+   * Al abrir la aplicación comprobamos
+   * si este teléfono ya tiene una sesión.
+   */
+  useEffect(() => {
+    async function comprobarSesion() {
+      try {
+        const respuesta = await fetch(
+          "/api/sesion",
+          {
+            method: "GET",
+            cache: "no-store",
+          }
+        )
+
+        const resultado: ResultadoLogin =
+          await respuesta.json()
+
+        if (
+          respuesta.ok &&
+          resultado.ok &&
+          resultado.sesion === true &&
+          resultado.tecnico &&
+          resultado.consentimiento
+            ?.aceptado === true
+        ) {
+          setTecnico(resultado.tecnico)
+          setConsentimientoGuardado(true)
+        }
+      } catch (error) {
+        console.error(
+          "No se pudo comprobar la sesión:",
+          error
+        )
+      } finally {
+        setComprobandoSesion(false)
+      }
+    }
+
+    comprobarSesion()
+  }, [])
+
+  /*
+   * Reloj de la credencial.
+   */
   useEffect(() => {
     const timer = setInterval(() => {
       setAhora(new Date())
@@ -306,6 +357,9 @@ export default function HomePage() {
     return () => clearInterval(timer)
   }, [])
 
+  /*
+   * QR generado dentro de la aplicación.
+   */
   useEffect(() => {
     async function generarQr() {
       if (
@@ -423,7 +477,6 @@ export default function HomePage() {
           ?.aceptado !== true
       ) {
         setRequiereConsentimiento(true)
-
         return
       }
 
@@ -487,12 +540,17 @@ export default function HomePage() {
         )
 
         setTipoMensaje("error")
-
         return
       }
 
       setRequiereConsentimiento(false)
       setConsentimientoGuardado(true)
+
+      /*
+       * La clave deja de ser necesaria
+       * una vez completado el primer ingreso.
+       */
+      setClave("")
     } catch {
       setMensaje(
         "No se pudo guardar la aceptación."
@@ -504,25 +562,66 @@ export default function HomePage() {
     }
   }
 
-  function cerrarSesion() {
-    setTecnico(null)
-    setConsentimientoGuardado(false)
-    setRequiereConsentimiento(false)
+  /*
+   * Mientras comprobamos si ya existe
+   * una sesión, no mostramos el login.
+   */
+  if (comprobandoSesion) {
+    return (
+      <main
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: "24px",
+          background:
+            "linear-gradient(180deg,#075985 0%,#0c4a6e 42%,#f4f7fb 42%)",
+        }}
+      >
+        <section
+          style={{
+            width: "100%",
+            maxWidth: "420px",
+            background: "white",
+            borderRadius: "22px",
+            padding: "38px 28px",
+            textAlign: "center",
+            boxShadow:
+              "0 20px 60px rgba(15,23,42,0.18)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "42px",
+            }}
+          >
+            ❄
+          </div>
 
-    setMatricula("")
-    setClave("")
+          <h1
+            style={{
+              marginBottom: "8px",
+            }}
+          >
+            RENACLI
+          </h1>
 
-    setAceptaReglamento(false)
-    setAceptaPrivacidad(false)
-
-    setLlegoFinalReglamento(false)
-    setLlegoFinalPrivacidad(false)
-
-    setQrImagen("")
-    setMensaje("")
-    setTipoMensaje("")
+          <p
+            style={{
+              color: "#64748b",
+            }}
+          >
+            Verificando credencial...
+          </p>
+        </section>
+      </main>
+    )
   }
 
+  /*
+   * CREDENCIAL DIGITAL
+   */
   if (
     consentimientoGuardado &&
     tecnico
@@ -589,8 +688,7 @@ export default function HomePage() {
 
             <h1
               style={{
-                margin:
-                  "8px 0 2px 0",
+                margin: "8px 0 2px 0",
                 fontSize: "31px",
                 letterSpacing: "1px",
               }}
@@ -720,8 +818,7 @@ export default function HomePage() {
             >
               <div
                 style={{
-                  padding:
-                    "8px 18px",
+                  padding: "8px 18px",
                   borderRadius: "999px",
                   fontWeight: "bold",
                   fontSize: "14px",
@@ -904,31 +1001,16 @@ export default function HomePage() {
               por autoridades competentes
               cuando correspondan.
             </div>
-
-            <button
-              type="button"
-              onClick={cerrarSesion}
-              style={{
-                width: "100%",
-                marginTop: "18px",
-                padding: "13px",
-                border:
-                  "1px solid #cbd5e1",
-                borderRadius: "11px",
-                background: "white",
-                color: "#334155",
-                fontWeight: "bold",
-                cursor: "pointer",
-              }}
-            >
-              Cerrar sesión
-            </button>
           </div>
         </section>
       </main>
     )
   }
 
+  /*
+   * PRIMER INGRESO:
+   * REGLAMENTO Y PRIVACIDAD
+   */
   if (
     requiereConsentimiento &&
     tecnico
@@ -1235,6 +1317,9 @@ export default function HomePage() {
     )
   }
 
+  /*
+   * LOGIN - SOLO PARA PRIMER INGRESO
+   */
   return (
     <main
       style={{
@@ -1307,8 +1392,7 @@ export default function HomePage() {
             style={{
               width: "100%",
               padding: "13px",
-              margin:
-                "7px 0 18px",
+              margin: "7px 0 18px",
               border:
                 "1px solid #cbd5e1",
               borderRadius: "10px",
@@ -1333,8 +1417,7 @@ export default function HomePage() {
             style={{
               width: "100%",
               padding: "13px",
-              margin:
-                "7px 0 20px",
+              margin: "7px 0 20px",
               border:
                 "1px solid #cbd5e1",
               borderRadius: "10px",
