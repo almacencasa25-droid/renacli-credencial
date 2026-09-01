@@ -10,6 +10,10 @@ type ResultadoLogin = {
     matricula: string
     nombre: string
   }
+  consentimiento?: {
+    aceptado: boolean
+    autoriza_publicacion: boolean
+  }
 }
 
 export default function HomePage() {
@@ -20,6 +24,12 @@ export default function HomePage() {
   const [tipoMensaje, setTipoMensaje] = useState<
     "ok" | "error" | ""
   >("")
+
+  const [tecnico, setTecnico] =
+    useState<ResultadoLogin["tecnico"]>()
+
+  const [requiereConsentimiento, setRequiereConsentimiento] =
+    useState(false)
 
   async function enviarFormulario(event: FormEvent) {
     event.preventDefault()
@@ -52,6 +62,16 @@ export default function HomePage() {
         return
       }
 
+      setTecnico(resultado.tecnico)
+
+      if (
+        resultado.consentimiento?.aceptado !== true
+      ) {
+        setRequiereConsentimiento(true)
+        setMensaje("")
+        return
+      }
+
       setTipoMensaje("ok")
       setMensaje(
         `Acceso correcto. Bienvenido ${
@@ -66,6 +86,170 @@ export default function HomePage() {
     } finally {
       setCargando(false)
     }
+  }
+
+  if (requiereConsentimiento && tecnico) {
+    return (
+      <main
+        style={{
+          minHeight: "100vh",
+          padding: "24px",
+          background: "#f4f7fb",
+        }}
+      >
+        <section
+          style={{
+            width: "100%",
+            maxWidth: "620px",
+            margin: "30px auto",
+            background: "white",
+            borderRadius: "22px",
+            padding: "28px",
+            boxShadow:
+              "0 20px 60px rgba(15, 23, 42, 0.12)",
+          }}
+        >
+          <div
+            style={{
+              textAlign: "center",
+              marginBottom: "24px",
+            }}
+          >
+            <div
+              style={{
+                width: "64px",
+                height: "64px",
+                margin: "0 auto 12px",
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "#e0f2fe",
+                fontSize: "32px",
+              }}
+            >
+              ❄
+            </div>
+
+            <h1
+              style={{
+                margin: 0,
+                color: "#0f172a",
+              }}
+            >
+              RENACLI
+            </h1>
+
+            <p
+              style={{
+                margin: "6px 0 0",
+                color: "#64748b",
+              }}
+            >
+              Primer ingreso
+            </p>
+          </div>
+
+          <div
+            style={{
+              padding: "14px",
+              background: "#eff6ff",
+              borderRadius: "12px",
+              marginBottom: "22px",
+            }}
+          >
+            <strong>{tecnico.nombre}</strong>
+
+            <div
+              style={{
+                marginTop: "4px",
+                color: "#475569",
+                fontSize: "14px",
+              }}
+            >
+              Matrícula: {tecnico.matricula}
+            </div>
+          </div>
+
+          <h2
+            style={{
+              fontSize: "20px",
+              marginBottom: "10px",
+            }}
+          >
+            Aceptación obligatoria
+          </h2>
+
+          <p
+            style={{
+              color: "#475569",
+              lineHeight: 1.6,
+            }}
+          >
+            Antes de utilizar la Credencial Digital,
+            tenés que leer y aceptar el Reglamento
+            General de RENACLI y la Política de
+            Privacidad.
+          </p>
+
+          <div
+            style={{
+              display: "grid",
+              gap: "10px",
+              marginTop: "20px",
+            }}
+          >
+            <a
+              href="https://renacli-web.vercel.app/reglamento"
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                padding: "13px",
+                border: "1px solid #cbd5e1",
+                borderRadius: "10px",
+                textAlign: "center",
+                fontWeight: "bold",
+                color: "#075985",
+              }}
+            >
+              Ver Reglamento General
+            </a>
+
+            <a
+              href="https://renacli-web.vercel.app/privacidad"
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                padding: "13px",
+                border: "1px solid #cbd5e1",
+                borderRadius: "10px",
+                textAlign: "center",
+                fontWeight: "bold",
+                color: "#075985",
+              }}
+            >
+              Ver Política de Privacidad
+            </a>
+          </div>
+
+          <div
+            style={{
+              marginTop: "24px",
+              padding: "16px",
+              background: "#fffbeb",
+              borderRadius: "12px",
+              color: "#92400e",
+              fontSize: "14px",
+              lineHeight: 1.5,
+            }}
+          >
+            En el próximo paso vas a poder marcar
+            personalmente las aceptaciones y la
+            autorización de publicación de datos.
+          </div>
+        </section>
+      </main>
+    )
   }
 
   return (
@@ -155,7 +339,6 @@ export default function HomePage() {
               )
             }
             placeholder="RNC-000000"
-            autoComplete="username"
             required
             disabled={cargando}
             style={{
@@ -164,9 +347,6 @@ export default function HomePage() {
               border: "1px solid #cbd5e1",
               borderRadius: "10px",
               marginBottom: "18px",
-              background: cargando
-                ? "#f8fafc"
-                : "white",
             }}
           />
 
@@ -188,7 +368,6 @@ export default function HomePage() {
               setClave(e.target.value)
             }
             placeholder="Ingresá tu clave"
-            autoComplete="current-password"
             required
             disabled={cargando}
             style={{
@@ -197,9 +376,6 @@ export default function HomePage() {
               border: "1px solid #cbd5e1",
               borderRadius: "10px",
               marginBottom: "20px",
-              background: cargando
-                ? "#f8fafc"
-                : "white",
             }}
           />
 
@@ -216,9 +392,6 @@ export default function HomePage() {
                 : "#075985",
               color: "white",
               fontWeight: "bold",
-              cursor: cargando
-                ? "not-allowed"
-                : "pointer",
             }}
           >
             {cargando
@@ -249,20 +422,6 @@ export default function HomePage() {
             {mensaje}
           </div>
         )}
-
-        <p
-          style={{
-            margin: "18px 0 0",
-            textAlign: "center",
-            color: "#64748b",
-            fontSize: "12px",
-            lineHeight: 1.5,
-          }}
-        >
-          Acceso exclusivo para técnicos con
-          matrícula RENACLI y clave asignada por
-          Administración.
-        </p>
       </section>
     </main>
   )
