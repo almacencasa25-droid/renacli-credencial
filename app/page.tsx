@@ -1,708 +1,690 @@
-"use client"
+import crypto from "crypto"
+import { cookies } from "next/headers"
+import { redirect } from "next/navigation"
+import { createClient } from "@supabase/supabase-js"
 
-import {
-  FormEvent,
-  UIEvent,
-  useEffect,
-  useState,
-} from "react"
+const COOKIE_NAME = "renacli_admin_session"
 
-import QRCode from "qrcode"
-
-type Tecnico = {
+type MatriculadoAdmin = {
   id: number
-  matricula: string
-  nombre: string
-  foto: string | null
-  estado: string
-  especialidad: string | null
+  numero_matricula: string | null
+  apellido_nombre: string | null
+  dni: string | null
+  telefono: string | null
+  email: string | null
+  domicilio: string | null
   localidad: string | null
   provincia: string | null
-  telefono: string | null
-  fechaEmision: string | null
-  fechaVencimiento: string | null
-  codigoVerificacion: string | null
-  urlVerificacion: string | null
+  fecha_emision: string | null
+  fecha_vencimiento: string | null
+  estado: string | null
+  especialidad: string | null
+  foto_url: string | null
+  codigo_qr: string | null
+  observaciones: string | null
 }
 
-type ResultadoLogin = {
-  ok: boolean
-  mensaje?: string
-  sesion?: boolean
+function obtenerTokenAdministrador() {
+  const password = process.env.RENACLI_ADMIN_PASSWORD
 
-  tecnico?: Tecnico
+  if (!password) return null
 
-  consentimiento?: {
-    aceptado: boolean
-    autoriza_publicacion: boolean
+  return crypto
+    .createHash("sha256")
+    .update(password)
+    .digest("hex")
+}
+
+function obtenerSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const secret = process.env.SUPABASE_SECRET_KEY
+
+  if (!url || !secret) {
+    throw new Error(
+      "Falta configurar Supabase para el administrador."
+    )
   }
+
+  return createClient(url, secret, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  })
 }
 
-const textoReglamento = `
-REGLAMENTO GENERAL RENACLI — Versión 1.0
+async function estaAutorizado() {
+  const cookieStore = await cookies()
 
-1. OBJETO
-RENACLI es un sistema privado de evaluación, acreditación,
-registro y verificación de técnicos vinculados con la
-climatización y la refrigeración.
+  const tokenGuardado =
+    cookieStore.get(COOKIE_NAME)?.value
 
-La matrícula RENACLI no sustituye habilitaciones, licencias,
-matrículas o registros exigidos por autoridades competentes
-cuando correspondan.
+  const tokenCorrecto =
+    obtenerTokenAdministrador()
 
-2. REQUISITOS
-Para incorporarse al registro, el postulante deberá cumplir
-los requisitos establecidos por RENACLI, presentar la
-documentación requerida y aprobar las instancias de
-evaluación que correspondan.
+  return (
+    Boolean(tokenCorrecto) &&
+    tokenGuardado === tokenCorrecto
+  )
+}
 
-3. EVALUACIÓN
-La acreditación podrá comprender evaluación teórica,
-práctica, documental o una combinación de ellas.
+async function iniciarSesion(formData: FormData) {
+  "use server"
 
-4. EMISIÓN DE MATRÍCULA
-Una vez cumplidos los requisitos, RENACLI podrá asignar un
-número de matrícula individual y verificable.
+  const passwordIngresada = String(
+    formData.get("password") ?? ""
+  )
 
-5. VIGENCIA
-La matrícula tendrá la vigencia determinada por RENACLI y
-deberá renovarse conforme las condiciones informadas.
+  const passwordCorrecta =
+    process.env.RENACLI_ADMIN_PASSWORD
 
-6. OBLIGACIONES DEL MATRICULADO
-El técnico deberá actuar de manera responsable, mantener sus
-datos actualizados y respetar las buenas prácticas propias de
-su actividad.
+  if (!passwordCorrecta) {
+    redirect("/administrador?error=config")
+  }
 
-7. RECLAMOS
-RENACLI podrá recibir reclamos relacionados con trabajos o
-conductas de técnicos registrados.
+  if (passwordIngresada !== passwordCorrecta) {
+    redirect("/administrador?error=incorrecta")
+  }
 
-La sola presentación de un reclamo no implica culpabilidad
-ni suspensión automática.
+  const token = obtenerTokenAdministrador()
 
-8. DERECHO A DESCARGO
-El matriculado tendrá derecho a conocer los hechos que se le
-atribuyan y realizar su correspondiente descargo.
+  if (!token) {
+    redirect("/administrador?error=config")
+  }
 
-9. ADVERTENCIAS
-RENACLI podrá emitir advertencias cuando corresponda,
-teniendo en cuenta la naturaleza y gravedad de cada caso.
+  const cookieStore = await cookies()
 
-10. SUSPENSIÓN
-La matrícula podrá ser suspendida cuando existan causas
-debidamente evaluadas que justifiquen esa medida.
+  cookieStore.set(COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+    maxAge: 60 * 60 * 8,
+  })
 
-11. SUSPENSIÓN PREVENTIVA
-Ante situaciones objetivamente graves relacionadas con
-riesgo, fraude, suplantación de identidad o uso indebido de
-la matrícula, podrá disponerse una suspensión preventiva
-mientras se analiza el caso.
+  redirect("/administrador")
+}
 
-12. REHABILITACIÓN
-Cuando desaparezcan las causas que originaron la suspensión,
-RENACLI podrá rehabilitar la matrícula.
+async function cerrarSesion() {
+  "use server"
 
-13. BAJA DEFINITIVA
-Podrá disponerse la baja cuando corresponda conforme al
-reglamento, respetando el procedimiento aplicable.
+  const cookieStore = await cookies()
 
-14. EFECTOS DE LA BAJA
-Una matrícula dada de baja dejará de figurar como vigente y
-no podrá presentarse como activa.
+  cookieStore.delete(COOKIE_NAME)
 
-15. RENOVACIÓN
-La renovación podrá requerir actualización de documentación,
-datos, acreditaciones o cualquier requisito vigente.
+  redirect("/administrador")
+}
 
-16. PROTECCIÓN DE DATOS
-RENACLI tratará los datos personales conforme su Política de
-Privacidad y la normativa aplicable.
+async function crearMatriculado(formData: FormData) {
+  "use server"
 
-17. QR Y CONSULTA PÚBLICA
-La credencial podrá incorporar mecanismos de verificación
-digital, códigos QR y otros elementos destinados a
-comprobar autenticidad y vigencia.
+  if (!(await estaAutorizado())) {
+    redirect("/administrador")
+  }
 
-18. PROHIBICIÓN DE CESIÓN
-La matrícula, credencial, clave y demás mecanismos de acceso
-son personales e intransferibles.
+  const apellidoNombre = String(
+    formData.get("apellido_nombre") ?? ""
+  ).trim()
 
-19. USO DEL NOMBRE RENACLI
-La inscripción no autoriza a presentar a RENACLI como
-organismo estatal, autoridad pública ni entidad oficial del
-Estado.
+  const dni = String(
+    formData.get("dni") ?? ""
+  ).trim()
 
-20. MODIFICACIONES
-RENACLI podrá actualizar este reglamento. Cuando una nueva
-versión requiera nueva aceptación, el técnico deberá
-aceptarla antes de continuar utilizando la credencial.
+  const especialidad = String(
+    formData.get("especialidad") ?? ""
+  ).trim()
 
-FIN DEL REGLAMENTO GENERAL — VERSIÓN 1.0
-`
+  const localidad = String(
+    formData.get("localidad") ?? ""
+  ).trim()
 
-const textoPrivacidad = `
-POLÍTICA DE PRIVACIDAD RENACLI — Versión 1.0
+  const provincia = String(
+    formData.get("provincia") ?? ""
+  ).trim()
 
-1. RESPONSABLE Y ALCANCE
-RENACLI administra información vinculada con técnicos
-registrados dentro de su sistema privado de evaluación,
-acreditación y verificación.
+  const telefono = String(
+    formData.get("telefono") ?? ""
+  ).trim()
 
-2. DATOS QUE PUEDEN RECOPILARSE
-Podrán tratarse datos identificatorios, datos de contacto,
-fotografía, información profesional, documentación,
-matrícula, especialidad, localidad, provincia, fechas de
-emisión y vencimiento y datos necesarios para la gestión del
-registro.
+  const fechaEmision = String(
+    formData.get("fecha_emision") ?? ""
+  ).trim()
 
-3. FINALIDADES DEL TRATAMIENTO
-Los datos podrán utilizarse para gestionar la matrícula,
-identificar al técnico, verificar vigencia, administrar
-renovaciones, mantener la credencial digital y cumplir las
-funciones propias del sistema RENACLI.
+  const fechaVencimiento = String(
+    formData.get("fecha_vencimiento") ?? ""
+  ).trim()
 
-4. INFORMACIÓN DE CONSULTA PÚBLICA
-Cuando corresponda y exista autorización aplicable, la
-consulta pública podrá mostrar determinados datos destinados
-a verificar la identidad y estado de la matrícula.
+  if (
+    !apellidoNombre ||
+    !dni ||
+    !especialidad ||
+    !localidad ||
+    !provincia ||
+    !fechaEmision ||
+    !fechaVencimiento
+  ) {
+    redirect(
+      "/administrador?nuevo=1&error=campos"
+    )
+  }
 
-RENACLI no deberá publicar información privada que no resulte
-necesaria para esa finalidad.
+  const supabase = obtenerSupabaseAdmin()
 
-5. CONSENTIMIENTO
-Cuando el tratamiento o publicación requiera consentimiento,
-el técnico deberá prestarlo de manera expresa.
+  const { data: existente } = await supabase
+    .from("matriculados")
+    .select("id")
+    .eq("dni", dni)
+    .maybeSingle()
 
-El sistema podrá registrar la fecha y versión del documento
-aceptado como constancia de dicha decisión.
+  if (existente) {
+    redirect(
+      "/administrador?nuevo=1&error=dni"
+    )
+  }
 
-6. CONSERVACIÓN Y SEGURIDAD
-RENACLI adoptará medidas razonables destinadas a proteger la
-información y evitar accesos no autorizados.
+  const { data, error } = await supabase
+    .from("matriculados")
+    .insert({
+      apellido_nombre: apellidoNombre,
+      dni,
+      especialidad,
+      localidad,
+      provincia,
+      telefono,
+      fecha_emision: fechaEmision,
+      fecha_vencimiento: fechaVencimiento,
+      estado: "vigente",
+    })
+    .select("id")
+    .single()
 
-7. ACCESO, ACTUALIZACIÓN, RECTIFICACIÓN Y SUPRESIÓN
-El titular podrá solicitar, según corresponda, acceso,
-actualización, rectificación o supresión de sus datos de
-acuerdo con la normativa aplicable y las obligaciones de
-conservación existentes.
+  if (error || !data) {
+    console.error(
+      "[RENACLI] Error creando matriculado:",
+      error
+    )
 
-8. SERVICIOS TECNOLÓGICOS
-Para prestar sus servicios RENACLI podrá utilizar
-proveedores tecnológicos necesarios para almacenamiento,
-alojamiento, funcionamiento de la aplicación y protección
-de la información.
+    redirect(
+      "/administrador?nuevo=1&error=guardar"
+    )
+  }
 
-9. CAMBIOS EN ESTA POLÍTICA
-La Política de Privacidad podrá actualizarse.
+  const { data: numeroRnc, error: errorRnc } =
+    await supabase.rpc(
+      "asignar_matricula_rnc",
+      {
+        p_matriculado_id: data.id,
+      }
+    )
 
-Cuando una nueva versión requiera una nueva aceptación, el
-técnico deberá revisarla y aceptarla antes de continuar
-utilizando la credencial.
+  if (errorRnc || !numeroRnc) {
+    console.error(
+      "[RENACLI] Error generando RNC:",
+      errorRnc
+    )
 
-10. CONTACTO
-Las consultas relacionadas con privacidad podrán realizarse
-por los medios de contacto publicados por RENACLI.
+    redirect(
+      `/administrador?error=rnc&id=${data.id}`
+    )
+  }
 
-FIN DE LA POLÍTICA DE PRIVACIDAD — VERSIÓN 1.0
-`
+  redirect(
+    `/administrador?creado=1&rnc=${encodeURIComponent(
+      String(numeroRnc)
+    )}`
+  )
+}
 
-function formatearFecha(fecha: string | null) {
-  if (!fecha) return "No informada"
+async function editarMatriculado(
+  formData: FormData
+) {
+  "use server"
 
-  const partes = fecha.split("-")
+  if (!(await estaAutorizado())) {
+    redirect("/administrador")
+  }
 
-  if (partes.length < 3) {
+  const id = Number(formData.get("id"))
+
+  const apellidoNombre = String(
+    formData.get("apellido_nombre") ?? ""
+  ).trim()
+
+  const dni = String(
+    formData.get("dni") ?? ""
+  ).trim()
+
+  const telefono = String(
+    formData.get("telefono") ?? ""
+  ).trim()
+
+  const email = String(
+    formData.get("email") ?? ""
+  ).trim()
+
+  const domicilio = String(
+    formData.get("domicilio") ?? ""
+  ).trim()
+
+  const localidad = String(
+    formData.get("localidad") ?? ""
+  ).trim()
+
+  const provincia = String(
+    formData.get("provincia") ?? ""
+  ).trim()
+
+  const especialidad = String(
+    formData.get("especialidad") ?? ""
+  ).trim()
+
+  const fechaEmision = String(
+    formData.get("fecha_emision") ?? ""
+  ).trim()
+
+  const fechaVencimiento = String(
+    formData.get("fecha_vencimiento") ?? ""
+  ).trim()
+
+  const observaciones = String(
+    formData.get("observaciones") ?? ""
+  ).trim()
+
+  if (
+    !id ||
+    !apellidoNombre ||
+    !dni ||
+    !especialidad ||
+    !localidad ||
+    !provincia
+  ) {
+    redirect(
+      "/administrador?error=editar"
+    )
+  }
+
+  const supabase = obtenerSupabaseAdmin()
+
+  const { error } = await supabase
+    .from("matriculados")
+    .update({
+      apellido_nombre: apellidoNombre,
+      dni,
+      telefono,
+      email,
+      domicilio,
+      localidad,
+      provincia,
+      especialidad,
+      fecha_emision:
+        fechaEmision || null,
+      fecha_vencimiento:
+        fechaVencimiento || null,
+      observaciones,
+    })
+    .eq("id", id)
+
+  if (error) {
+    console.error(
+      "[RENACLI] Error editando matriculado:",
+      error
+    )
+
+    redirect(
+      `/administrador?buscar=1&error=editar`
+    )
+  }
+
+  redirect(
+    `/administrador?buscar=1&q=${encodeURIComponent(
+      apellidoNombre
+    )}&mensaje=editado`
+  )
+}
+
+async function cambiarEstado(
+  formData: FormData
+) {
+  "use server"
+
+  if (!(await estaAutorizado())) {
+    redirect("/administrador")
+  }
+
+  const id = Number(formData.get("id"))
+  const estado = String(
+    formData.get("estado") ?? ""
+  )
+
+  const q = String(
+    formData.get("q") ?? ""
+  )
+
+  if (
+    !id ||
+    !["vigente", "suspendida"].includes(
+      estado
+    )
+  ) {
+    redirect("/administrador")
+  }
+
+  const supabase = obtenerSupabaseAdmin()
+
+  const { error } = await supabase
+    .from("matriculados")
+    .update({
+      estado,
+    })
+    .eq("id", id)
+
+  if (error) {
+    console.error(
+      "[RENACLI] Error cambiando estado:",
+      error
+    )
+
+    redirect(
+      `/administrador?buscar=1&q=${encodeURIComponent(
+        q
+      )}&error=estado`
+    )
+  }
+
+  redirect(
+    `/administrador?buscar=1&q=${encodeURIComponent(
+      q
+    )}&mensaje=estado`
+  )
+}
+
+async function darDeBaja(
+  formData: FormData
+) {
+  "use server"
+
+  if (!(await estaAutorizado())) {
+    redirect("/administrador")
+  }
+
+  const id = Number(formData.get("id"))
+
+  const q = String(
+    formData.get("q") ?? ""
+  )
+
+  if (!id) {
+    redirect("/administrador")
+  }
+
+  const supabase = obtenerSupabaseAdmin()
+
+  const {
+    data: liberado,
+    error: errorLiberar,
+  } = await supabase.rpc(
+    "liberar_matricula_rnc",
+    {
+      p_matriculado_id: id,
+    }
+  )
+
+  if (errorLiberar) {
+    console.error(
+      "[RENACLI] Error liberando RNC:",
+      errorLiberar
+    )
+
+    redirect(
+      `/administrador?buscar=1&q=${encodeURIComponent(
+        q
+      )}&error=baja`
+    )
+  }
+
+  const { error: errorEstado } =
+    await supabase
+      .from("matriculados")
+      .update({
+        estado: "baja",
+      })
+      .eq("id", id)
+
+  if (errorEstado) {
+    console.error(
+      "[RENACLI] Error marcando baja:",
+      errorEstado
+    )
+
+    redirect(
+      `/administrador?buscar=1&q=${encodeURIComponent(
+        q
+      )}&error=baja`
+    )
+  }
+
+  redirect(
+    `/administrador?buscar=1&q=${encodeURIComponent(
+      q
+    )}&mensaje=baja&liberado=${
+      liberado ? "1" : "0"
+    }`
+  )
+}
+
+async function buscarMatriculados(
+  termino: string
+): Promise<MatriculadoAdmin[]> {
+  const busqueda = termino.trim()
+
+  if (!busqueda) return []
+
+  const supabase = obtenerSupabaseAdmin()
+
+  const terminoSeguro = busqueda
+    .replace(/,/g, "")
+    .replace(/\(/g, "")
+    .replace(/\)/g, "")
+
+  const { data, error } = await supabase
+    .from("matriculados")
+    .select(
+      `
+        id,
+        numero_matricula,
+        apellido_nombre,
+        dni,
+        telefono,
+        email,
+        domicilio,
+        localidad,
+        provincia,
+        fecha_emision,
+        fecha_vencimiento,
+        estado,
+        especialidad,
+        foto_url,
+        codigo_qr,
+        observaciones
+      `
+    )
+    .or(
+      `numero_matricula.ilike.%${terminoSeguro}%,dni.ilike.%${terminoSeguro}%,apellido_nombre.ilike.%${terminoSeguro}%`
+    )
+    .order("apellido_nombre", {
+      ascending: true,
+    })
+    .limit(50)
+
+  if (error) {
+    console.error(
+      "[RENACLI] Error buscando matriculados:",
+      error
+    )
+
+    return []
+  }
+
+  return (data ?? []) as MatriculadoAdmin[]
+}
+
+async function obtenerMatriculadoPorId(
+  id: number
+): Promise<MatriculadoAdmin | null> {
+  const supabase = obtenerSupabaseAdmin()
+
+  const { data, error } = await supabase
+    .from("matriculados")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle()
+
+  if (error || !data) {
+    return null
+  }
+
+  return data as MatriculadoAdmin
+}
+
+function formatearFecha(
+  fecha: string | null
+) {
+  if (!fecha) return "-"
+
+  const partes =
+    fecha.slice(0, 10).split("-")
+
+  if (partes.length !== 3) {
     return fecha
   }
 
-  const anio = partes[0]
-  const mes = partes[1]
-  const dia = partes[2].substring(0, 2)
-
-  return `${dia}/${mes}/${anio}`
+  return `${partes[2]}/${partes[1]}/${partes[0]}`
 }
 
-function colorEstado(estado: string) {
-  const valor = estado.toLowerCase()
+function fechaHoyArgentina() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date())
+}
 
-  if (valor === "vigente") {
-    return {
-      fondo: "#dcfce7",
-      texto: "#166534",
-    }
+function estadoEfectivo(
+  matriculado: MatriculadoAdmin
+) {
+  const estadoBase = (
+    matriculado.estado || ""
+  ).toLowerCase()
+
+  if (estadoBase.includes("baja")) {
+    return "baja"
+  }
+
+  if (estadoBase.includes("suspend")) {
+    return "suspendida"
   }
 
   if (
-    valor === "suspendida" ||
-    valor === "suspendido"
+    matriculado.fecha_vencimiento &&
+    matriculado.fecha_vencimiento.slice(0, 10) <
+      fechaHoyArgentina()
   ) {
-    return {
-      fondo: "#fef3c7",
-      texto: "#92400e",
-    }
+    return "vencida"
   }
 
-  return {
-    fondo: "#fee2e2",
-    texto: "#991b1b",
-  }
+  return "vigente"
 }
 
-function crearDispositivoId() {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return crypto.randomUUID()
-  }
+function diasHastaVencimiento(
+  fecha: string | null
+) {
+  if (!fecha) return null
 
-  return (
-    "rnc-" +
-    Date.now().toString(36) +
-    "-" +
-    Math.random().toString(36).substring(2) +
-    "-" +
-    Math.random().toString(36).substring(2)
+  const hoy = new Date(
+    `${fechaHoyArgentina()}T00:00:00`
+  )
+  const vencimiento = new Date(
+    `${fecha.slice(0, 10)}T00:00:00`
+  )
+
+  return Math.ceil(
+    (vencimiento.getTime() - hoy.getTime()) /
+      86400000
   )
 }
 
-export default function HomePage() {
-  const [matricula, setMatricula] = useState("")
-  const [clave, setClave] = useState("")
+async function obtenerTodosMatriculados():
+  Promise<MatriculadoAdmin[]> {
+  const supabase = obtenerSupabaseAdmin()
 
-  const [
-    dispositivoId,
-    setDispositivoId,
-  ] = useState("")
+  const { data, error } = await supabase
+    .from("matriculados")
+    .select("*")
+    .order("apellido_nombre", {
+      ascending: true,
+    })
 
-  const [
-    dispositivoListo,
-    setDispositivoListo,
-  ] = useState(false)
-
-  const [cargando, setCargando] = useState(false)
-  const [guardando, setGuardando] = useState(false)
-
-  const [
-    comprobandoSesion,
-    setComprobandoSesion,
-  ] = useState(true)
-
-  const [mensaje, setMensaje] = useState("")
-  const [tipoMensaje, setTipoMensaje] = useState<
-    "ok" | "error" | ""
-  >("")
-
-  const [tecnico, setTecnico] =
-    useState<Tecnico | null>(null)
-
-  const [
-    requiereConsentimiento,
-    setRequiereConsentimiento,
-  ] = useState(false)
-
-  const [
-    llegoFinalReglamento,
-    setLlegoFinalReglamento,
-  ] = useState(false)
-
-  const [
-    llegoFinalPrivacidad,
-    setLlegoFinalPrivacidad,
-  ] = useState(false)
-
-  const [
-    aceptaReglamento,
-    setAceptaReglamento,
-  ] = useState(false)
-
-  const [
-    aceptaPrivacidad,
-    setAceptaPrivacidad,
-  ] = useState(false)
-
-  const [
-    consentimientoGuardado,
-    setConsentimientoGuardado,
-  ] = useState(false)
-
-  const [qrImagen, setQrImagen] = useState("")
-
-  const [ahora, setAhora] = useState(
-    new Date()
-  )
-
-  /*
-   * Creamos una identificación única
-   * para esta instalación/navegador.
-   *
-   * Se guarda localmente y no contiene
-   * la matrícula ni la contraseña.
-   */
-  useEffect(() => {
-    try {
-      const claveLocal =
-        "renacli_dispositivo_id"
-
-      const existente =
-        localStorage.getItem(claveLocal)
-
-      if (
-        existente &&
-        existente.trim().length >= 8
-      ) {
-        setDispositivoId(
-          existente.trim()
-        )
-
-        setDispositivoListo(true)
-        return
-      }
-
-      const nuevo =
-        crearDispositivoId()
-
-      localStorage.setItem(
-        claveLocal,
-        nuevo
-      )
-
-      setDispositivoId(nuevo)
-      setDispositivoListo(true)
-    } catch (error) {
-      console.error(
-        "Error creando identificador del dispositivo:",
-        error
-      )
-
-      /*
-       * Si localStorage fallara,
-       * generamos igualmente uno
-       * para evitar bloquear la pantalla.
-       */
-      const temporal =
-        crearDispositivoId()
-
-      setDispositivoId(temporal)
-      setDispositivoListo(true)
-    }
-  }, [])
-
-  /*
-   * Al abrir la aplicación comprobamos
-   * si este dispositivo ya tiene sesión.
-   */
-  useEffect(() => {
-    if (
-      !dispositivoListo ||
-      !dispositivoId
-    ) {
-      return
-    }
-
-    async function comprobarSesion() {
-      try {
-        const respuesta = await fetch(
-          "/api/sesion",
-          {
-            method: "GET",
-            cache: "no-store",
-
-            headers: {
-              "x-renacli-device-id":
-                dispositivoId,
-            },
-          }
-        )
-
-        const resultado: ResultadoLogin =
-          await respuesta.json()
-
-        if (
-          respuesta.ok &&
-          resultado.ok &&
-          resultado.sesion === true &&
-          resultado.tecnico &&
-          resultado.consentimiento
-            ?.aceptado === true
-        ) {
-          setTecnico(resultado.tecnico)
-          setConsentimientoGuardado(true)
-        }
-      } catch (error) {
-        console.error(
-          "No se pudo comprobar la sesión:",
-          error
-        )
-      } finally {
-        setComprobandoSesion(false)
-      }
-    }
-
-    comprobarSesion()
-  }, [
-    dispositivoListo,
-    dispositivoId,
-  ])
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setAhora(new Date())
-    }, 1000)
-
-    return () => clearInterval(timer)
-  }, [])
-
-  useEffect(() => {
-    async function generarQr() {
-      if (
-        !tecnico?.urlVerificacion ||
-        !consentimientoGuardado
-      ) {
-        setQrImagen("")
-        return
-      }
-
-      try {
-        const imagen =
-          await QRCode.toDataURL(
-            tecnico.urlVerificacion,
-            {
-              width: 420,
-              margin: 1,
-              errorCorrectionLevel: "M",
-            }
-          )
-
-        setQrImagen(imagen)
-      } catch (error) {
-        console.error(
-          "Error generando QR:",
-          error
-        )
-
-        setQrImagen("")
-      }
-    }
-
-    generarQr()
-  }, [
-    tecnico?.urlVerificacion,
-    consentimientoGuardado,
-  ])
-
-  function detectarFinal(
-    event: UIEvent<HTMLDivElement>,
-    tipo: "reglamento" | "privacidad"
-  ) {
-    const elemento = event.currentTarget
-
-    const llego =
-      elemento.scrollTop +
-        elemento.clientHeight >=
-      elemento.scrollHeight - 8
-
-    if (!llego) return
-
-    if (tipo === "reglamento") {
-      setLlegoFinalReglamento(true)
-    } else {
-      setLlegoFinalPrivacidad(true)
-    }
+  if (error) {
+    console.error(
+      "[RENACLI] Error obteniendo listado:",
+      error
+    )
+    return []
   }
 
-  async function enviarFormulario(
-    event: FormEvent
-  ) {
-    event.preventDefault()
+  return (data ?? []) as MatriculadoAdmin[]
+}
 
-    if (!dispositivoId) {
-      setTipoMensaje("error")
+type Props = {
+  searchParams?: Promise<{
+    error?: string
+    nuevo?: string
+    creado?: string
+    rnc?: string
+    buscar?: string
+    q?: string
+    editar?: string
+    baja?: string
+    mensaje?: string
+    liberado?: string
+    listado?: string
+  }>
+}
 
-      setMensaje(
-        "No se pudo identificar este dispositivo."
-      )
+export default async function AdministradorPage({
+  searchParams,
+}: Props) {
+  const parametros = searchParams
+    ? await searchParams
+    : {}
 
-      return
-    }
+  const autorizado =
+    await estaAutorizado()
 
-    setCargando(true)
-    setMensaje("")
-    setTipoMensaje("")
-
-    try {
-      const respuesta = await fetch(
-        "/api/login",
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-
-          body: JSON.stringify({
-            matricula,
-            clave,
-            dispositivoId,
-          }),
-        }
-      )
-
-      const resultado: ResultadoLogin =
-        await respuesta.json()
-
-      if (
-        !respuesta.ok ||
-        !resultado.ok
-      ) {
-        setTipoMensaje("error")
-
-        setMensaje(
-          resultado.mensaje ??
-            "No se pudo iniciar sesión."
-        )
-
-        return
-      }
-
-      if (!resultado.tecnico) {
-        setTipoMensaje("error")
-
-        setMensaje(
-          "No se pudieron obtener los datos del técnico."
-        )
-
-        return
-      }
-
-      setTecnico(resultado.tecnico)
-
-      if (
-        resultado.consentimiento
-          ?.aceptado !== true
-      ) {
-        setRequiereConsentimiento(true)
-        return
-      }
-
-      setConsentimientoGuardado(true)
-    } catch {
-      setTipoMensaje("error")
-
-      setMensaje(
-        "No se pudo conectar con RENACLI."
-      )
-    } finally {
-      setCargando(false)
-    }
-  }
-
-  async function aceptarYContinuar() {
-    if (
-      !tecnico ||
-      !aceptaReglamento ||
-      !aceptaPrivacidad
-    ) {
-      return
-    }
-
-    setGuardando(true)
-    setMensaje("")
-    setTipoMensaje("")
-
-    try {
-      const respuesta = await fetch(
-        "/api/consentimiento",
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-
-          body: JSON.stringify({
-            matricula,
-            clave,
-
-            aceptaReglamento: true,
-            aceptaPrivacidad: true,
-
-            autorizaPublicacion: true,
-          }),
-        }
-      )
-
-      const resultado =
-        await respuesta.json()
-
-      if (
-        !respuesta.ok ||
-        !resultado.ok
-      ) {
-        setMensaje(
-          resultado.mensaje ??
-            "No se pudo guardar la aceptación."
-        )
-
-        setTipoMensaje("error")
-        return
-      }
-
-      setRequiereConsentimiento(false)
-      setConsentimientoGuardado(true)
-      setClave("")
-    } catch {
-      setMensaje(
-        "No se pudo guardar la aceptación."
-      )
-
-      setTipoMensaje("error")
-    } finally {
-      setGuardando(false)
-    }
-  }
-
-  if (
-    comprobandoSesion ||
-    !dispositivoListo
-  ) {
+  if (!autorizado) {
     return (
       <main
         style={{
           minHeight: "100vh",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          padding: "24px",
-          background:
-            "linear-gradient(180deg,#075985 0%,#0c4a6e 42%,#f4f7fb 42%)",
+          background: "#eef5fa",
+          fontFamily:
+            "Arial, sans-serif",
         }}
       >
-        <section
+        <header
           style={{
-            width: "100%",
-            maxWidth: "420px",
-            background: "white",
-            borderRadius: "22px",
-            padding: "38px 28px",
-            textAlign: "center",
-            boxShadow:
-              "0 20px 60px rgba(15,23,42,0.18)",
+            background: "#0d4f7c",
+            color: "white",
+            padding: "25px 40px",
+            borderBottom:
+              "4px solid #35c4cf",
           }}
         >
-          <div
-            style={{
-              fontSize: "42px",
-            }}
-          >
-            ❄
-          </div>
-
           <h1
             style={{
-              marginBottom: "8px",
+              margin: 0,
+              letterSpacing: "4px",
             }}
           >
             RENACLI
@@ -710,857 +692,1130 @@ export default function HomePage() {
 
           <p
             style={{
-              color: "#64748b",
+              margin: "6px 0 0",
             }}
           >
-            Verificando credencial...
+            Registro Nacional de
+            Climatización y Refrigeración
           </p>
-        </section>
-      </main>
-    )
-  }
+        </header>
 
-  if (
-    consentimientoGuardado &&
-    tecnico
-  ) {
-    const colores =
-      colorEstado(tecnico.estado)
-
-    const ubicacion =
-      [
-        tecnico.localidad,
-        tecnico.provincia,
-      ]
-        .filter(Boolean)
-        .join(", ") ||
-      "No informada"
-
-    const fechaHora =
-      ahora.toLocaleString("es-AR", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      })
-
-    return (
-      <main
-        style={{
-          minHeight: "100vh",
-          padding: "18px",
-          background:
-            "linear-gradient(180deg,#075985 0%,#0c4a6e 34%,#eaf1f7 34%)",
-        }}
-      >
         <section
           style={{
-            width: "100%",
             maxWidth: "480px",
-            margin: "0 auto",
-            overflow: "hidden",
-            background: "white",
-            borderRadius: "24px",
-            boxShadow:
-              "0 20px 60px rgba(15,23,42,0.22)",
-          }}
-        >
-          <header
-            style={{
-              padding: "24px 22px",
-              textAlign: "center",
-              background: "#082f49",
-              color: "white",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "34px",
-                lineHeight: 1,
-              }}
-            >
-              ❄
-            </div>
-
-            <h1
-              style={{
-                margin: "8px 0 2px 0",
-                fontSize: "31px",
-                letterSpacing: "1px",
-              }}
-            >
-              RENACLI
-            </h1>
-
-            <div
-              style={{
-                fontSize: "11px",
-                fontWeight: "bold",
-                letterSpacing: "0.7px",
-                opacity: 0.9,
-              }}
-            >
-              REGISTRO NACIONAL DE
-              CLIMATIZACIÓN Y REFRIGERACIÓN
-            </div>
-
-            <div
-              style={{
-                marginTop: "14px",
-                fontSize: "13px",
-                fontWeight: "bold",
-              }}
-            >
-              CREDENCIAL DIGITAL
-            </div>
-          </header>
-
-          <div
-            style={{
-              padding: "24px",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                marginBottom: "18px",
-              }}
-            >
-              {tecnico.foto ? (
-                <img
-                  src={tecnico.foto}
-                  alt={`Foto de ${tecnico.nombre}`}
-                  style={{
-                    width: "135px",
-                    height: "165px",
-                    objectFit: "cover",
-                    borderRadius: "18px",
-                    border:
-                      "4px solid #e2e8f0",
-                    boxShadow:
-                      "0 8px 20px rgba(15,23,42,0.12)",
-                  }}
-                />
-              ) : (
-                <div
-                  style={{
-                    width: "135px",
-                    height: "165px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent:
-                      "center",
-                    padding: "12px",
-                    textAlign: "center",
-                    color: "#64748b",
-                    background: "#f8fafc",
-                    border:
-                      "2px dashed #cbd5e1",
-                    borderRadius: "18px",
-                  }}
-                >
-                  Foto no cargada
-                </div>
-              )}
-            </div>
-
-            <h2
-              style={{
-                margin: 0,
-                textAlign: "center",
-                fontSize: "24px",
-                color: "#0f172a",
-              }}
-            >
-              {tecnico.nombre}
-            </h2>
-
-            <div
-              style={{
-                marginTop: "10px",
-                textAlign: "center",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "#64748b",
-                  fontWeight: "bold",
-                }}
-              >
-                MATRÍCULA
-              </div>
-
-              <div
-                style={{
-                  marginTop: "3px",
-                  fontSize: "27px",
-                  fontWeight: "900",
-                  color: "#075985",
-                  letterSpacing: "1px",
-                }}
-              >
-                {tecnico.matricula}
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                marginTop: "12px",
-              }}
-            >
-              <div
-                style={{
-                  padding: "8px 18px",
-                  borderRadius: "999px",
-                  fontWeight: "bold",
-                  fontSize: "14px",
-                  background:
-                    colores.fondo,
-                  color: colores.texto,
-                }}
-              >
-                ●{" "}
-                {tecnico.estado.toUpperCase()}
-              </div>
-            </div>
-
-            <div
-              style={{
-                marginTop: "22px",
-                display: "grid",
-                gridTemplateColumns:
-                  "1fr 1fr",
-                gap: "12px",
-              }}
-            >
-              <Dato
-                titulo="Especialidad"
-                valor={
-                  tecnico.especialidad ||
-                  "No informada"
-                }
-              />
-
-              <Dato
-                titulo="Ubicación"
-                valor={ubicacion}
-              />
-
-              <Dato
-                titulo="Emisión"
-                valor={formatearFecha(
-                  tecnico.fechaEmision
-                )}
-              />
-
-              <Dato
-                titulo="Vencimiento"
-                valor={formatearFecha(
-                  tecnico.fechaVencimiento
-                )}
-              />
-            </div>
-
-            <div
-              style={{
-                marginTop: "24px",
-                padding: "18px",
-                textAlign: "center",
-                background: "#f8fafc",
-                border:
-                  "1px solid #e2e8f0",
-                borderRadius: "18px",
-              }}
-            >
-              {qrImagen ? (
-                <img
-                  src={qrImagen}
-                  alt="Código QR de verificación"
-                  style={{
-                    width: "190px",
-                    height: "190px",
-                    display: "block",
-                    margin: "0 auto",
-                  }}
-                />
-              ) : (
-                <div
-                  style={{
-                    height: "190px",
-                    display: "flex",
-                    justifyContent:
-                      "center",
-                    alignItems: "center",
-                    color: "#64748b",
-                  }}
-                >
-                  Generando QR...
-                </div>
-              )}
-
-              <div
-                style={{
-                  marginTop: "8px",
-                  fontSize: "12px",
-                  color: "#475569",
-                  fontWeight: "bold",
-                }}
-              >
-                Escaneá para verificar esta
-                matrícula
-              </div>
-            </div>
-
-            <div
-              style={{
-                marginTop: "18px",
-                padding: "14px",
-                borderRadius: "14px",
-                background: "#eff6ff",
-                border:
-                  "1px solid #bfdbfe",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "11px",
-                  fontWeight: "bold",
-                  color: "#475569",
-                }}
-              >
-                FECHA Y HORA DE VISUALIZACIÓN
-              </div>
-
-              <div
-                style={{
-                  marginTop: "4px",
-                  fontWeight: "bold",
-                  color: "#0f172a",
-                }}
-              >
-                {fechaHora}
-              </div>
-
-              {tecnico.codigoVerificacion ? (
-                <>
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      fontSize: "11px",
-                      fontWeight: "bold",
-                      color: "#475569",
-                    }}
-                  >
-                    CÓDIGO DE VERIFICACIÓN
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: "4px",
-                      fontSize: "11px",
-                      fontWeight: "bold",
-                      color: "#075985",
-                      wordBreak:
-                        "break-all",
-                    }}
-                  >
-                    {
-                      tecnico.codigoVerificacion
-                    }
-                  </div>
-                </>
-              ) : null}
-            </div>
-
-            <div
-              style={{
-                marginTop: "18px",
-                padding: "12px",
-                textAlign: "center",
-                background: "#f1f5f9",
-                borderRadius: "12px",
-                color: "#475569",
-                fontSize: "11px",
-                lineHeight: 1.5,
-              }}
-            >
-              RENACLI es un sistema privado de
-              evaluación, acreditación y
-              registro. Esta matrícula no
-              sustituye habilitaciones,
-              licencias o registros exigidos
-              por autoridades competentes
-              cuando correspondan.
-            </div>
-          </div>
-        </section>
-      </main>
-    )
-  }
-
-  if (
-    requiereConsentimiento &&
-    tecnico
-  ) {
-    const puedeContinuar =
-      aceptaReglamento &&
-      aceptaPrivacidad
-
-    return (
-      <main
-        style={{
-          minHeight: "100vh",
-          padding: "20px",
-          background: "#f4f7fb",
-        }}
-      >
-        <section
-          style={{
-            width: "100%",
-            maxWidth: "680px",
-            margin: "20px auto",
-            background: "white",
-            borderRadius: "22px",
-            padding: "26px",
-            boxShadow:
-              "0 20px 60px rgba(15,23,42,0.12)",
+            margin: "70px auto",
+            padding: "0 20px",
           }}
         >
           <div
             style={{
-              textAlign: "center",
-              marginBottom: "20px",
+              background: "white",
+              border:
+                "1px solid #d7e0e7",
+              borderRadius: "14px",
+              padding: "32px",
+              boxShadow:
+                "0 2px 8px rgba(0,0,0,0.08)",
             }}
           >
-            <div
-              style={{
-                fontSize: "36px",
-              }}
-            >
-              ❄
-            </div>
-
-            <h1>RENACLI</h1>
-
             <p
               style={{
                 color: "#64748b",
+                fontSize: "13px",
+                fontWeight: "bold",
+                letterSpacing: "1px",
               }}
             >
-              Primer ingreso
+              ACCESO RESTRINGIDO
             </p>
-          </div>
 
-          <div
-            style={{
-              padding: "14px",
-              background: "#eff6ff",
-              borderRadius: "12px",
-              marginBottom: "24px",
-            }}
-          >
-            <strong>
-              {tecnico.nombre}
-            </strong>
-
-            <div>
-              Matrícula:{" "}
-              {tecnico.matricula}
-            </div>
-          </div>
-
-          <h2>
-            Reglamento General
-          </h2>
-
-          <p
-            style={{
-              fontSize: "13px",
-              color: "#64748b",
-            }}
-          >
-            Deslizá hasta el final para
-            habilitar la aceptación.
-          </p>
-
-          <div
-            onScroll={(event) =>
-              detectarFinal(
-                event,
-                "reglamento"
-              )
-            }
-            style={{
-              height: "220px",
-              overflowY: "auto",
-              whiteSpace: "pre-line",
-              padding: "16px",
-              border:
-                "1px solid #cbd5e1",
-              borderRadius: "12px",
-              background: "#f8fafc",
-              lineHeight: 1.55,
-              fontSize: "14px",
-            }}
-          >
-            {textoReglamento}
-          </div>
-
-          <label
-            style={{
-              display: "flex",
-              gap: "10px",
-              alignItems: "center",
-              marginTop: "12px",
-              padding: "12px",
-              borderRadius: "10px",
-              background:
-                llegoFinalReglamento
-                  ? "#f0fdf4"
-                  : "#f1f5f9",
-              color:
-                llegoFinalReglamento
-                  ? "#166534"
-                  : "#94a3b8",
-              cursor:
-                llegoFinalReglamento
-                  ? "pointer"
-                  : "not-allowed",
-            }}
-          >
-            <input
-              type="checkbox"
-              disabled={
-                !llegoFinalReglamento
-              }
-              checked={
-                aceptaReglamento
-              }
-              onChange={(e) =>
-                setAceptaReglamento(
-                  e.target.checked
-                )
-              }
-            />
-
-            Acepto el Reglamento General
-            RENACLI versión 1.0
-          </label>
-
-          <h2
-            style={{
-              marginTop: "30px",
-            }}
-          >
-            Política de Privacidad
-          </h2>
-
-          <p
-            style={{
-              fontSize: "13px",
-              color: "#64748b",
-            }}
-          >
-            Deslizá hasta el final para
-            habilitar la aceptación.
-          </p>
-
-          <div
-            onScroll={(event) =>
-              detectarFinal(
-                event,
-                "privacidad"
-              )
-            }
-            style={{
-              height: "220px",
-              overflowY: "auto",
-              whiteSpace: "pre-line",
-              padding: "16px",
-              border:
-                "1px solid #cbd5e1",
-              borderRadius: "12px",
-              background: "#f8fafc",
-              lineHeight: 1.55,
-              fontSize: "14px",
-            }}
-          >
-            {textoPrivacidad}
-          </div>
-
-          <label
-            style={{
-              display: "flex",
-              gap: "10px",
-              alignItems: "center",
-              marginTop: "12px",
-              padding: "12px",
-              borderRadius: "10px",
-              background:
-                llegoFinalPrivacidad
-                  ? "#f0fdf4"
-                  : "#f1f5f9",
-              color:
-                llegoFinalPrivacidad
-                  ? "#166534"
-                  : "#94a3b8",
-              cursor:
-                llegoFinalPrivacidad
-                  ? "pointer"
-                  : "not-allowed",
-            }}
-          >
-            <input
-              type="checkbox"
-              disabled={
-                !llegoFinalPrivacidad
-              }
-              checked={
-                aceptaPrivacidad
-              }
-              onChange={(e) =>
-                setAceptaPrivacidad(
-                  e.target.checked
-                )
-              }
-            />
-
-            Acepto la Política de
-            Privacidad RENACLI versión 1.0
-          </label>
-
-          {puedeContinuar && (
-            <div
+            <h2
               style={{
-                marginTop: "24px",
+                marginTop: "8px",
+                color: "#172033",
               }}
             >
-              <div
+              Administración
+            </h2>
+
+            {parametros.error ===
+              "incorrecta" && (
+              <p
                 style={{
-                  padding: "14px",
-                  marginBottom: "14px",
-                  background: "#eff6ff",
-                  borderRadius: "10px",
-                  color: "#334155",
-                  fontSize: "13px",
-                  lineHeight: 1.55,
+                  color: "#be123c",
                 }}
               >
-                Al continuar, autorizás la
-                publicación de los datos
-                necesarios para la
-                identificación y verificación
-                pública de tu matrícula
-                RENACLI, conforme la Política
-                de Privacidad aceptada.
-              </div>
+                Contraseña incorrecta.
+              </p>
+            )}
 
-              <button
-                type="button"
-                onClick={
-                  aceptarYContinuar
-                }
-                disabled={guardando}
+            <form
+              action={iniciarSesion}
+            >
+              <label
+                style={{
+                  display: "block",
+                  fontWeight: "bold",
+                  marginBottom: "8px",
+                }}
+              >
+                Contraseña
+              </label>
+
+              <input
+                name="password"
+                type="password"
+                required
                 style={{
                   width: "100%",
-                  padding: "15px",
+                  boxSizing:
+                    "border-box",
+                  padding: "14px",
+                  borderRadius: "8px",
+                  border:
+                    "1px solid #cbd5e1",
+                  marginBottom: "18px",
+                }}
+              />
+
+              <button
+                type="submit"
+                style={{
+                  width: "100%",
+                  padding: "14px",
                   border: 0,
-                  borderRadius: "11px",
-                  background: guardando
-                    ? "#94a3b8"
-                    : "#075985",
+                  borderRadius: "8px",
+                  background: "#0d5689",
                   color: "white",
                   fontWeight: "bold",
-                  fontSize: "16px",
-                  cursor: guardando
-                    ? "not-allowed"
-                    : "pointer",
                 }}
               >
-                {guardando
-                  ? "Guardando aceptación..."
-                  : "ACEPTO Y CONTINUAR"}
+                Ingresar
               </button>
-            </div>
-          )}
-
-          {mensaje && (
-            <div
-              style={{
-                marginTop: "16px",
-                padding: "12px",
-                borderRadius: "10px",
-                background: "#fee2e2",
-                color: "#991b1b",
-                textAlign: "center",
-                fontWeight: "bold",
-              }}
-            >
-              {mensaje}
-            </div>
-          )}
+            </form>
+          </div>
         </section>
       </main>
     )
   }
+
+  const mostrarNuevo =
+    parametros.nuevo === "1"
+
+  const mostrarBusqueda =
+    parametros.buscar === "1"
+
+  const terminoBusqueda =
+    String(parametros.q ?? "").trim()
+
+  const editarId =
+    Number(parametros.editar ?? 0)
+
+  let matriculadoEditar:
+    MatriculadoAdmin | null = null
+
+  if (editarId) {
+    matriculadoEditar =
+      await obtenerMatriculadoPorId(
+        editarId
+      )
+  }
+
+  let resultados:
+    MatriculadoAdmin[] = []
+
+  if (
+    mostrarBusqueda &&
+    terminoBusqueda
+  ) {
+    resultados =
+      await buscarMatriculados(
+        terminoBusqueda
+      )
+  }
+
+  const todosMatriculados =
+    await obtenerTodosMatriculados()
+
+  const vigentes = todosMatriculados.filter(
+    m => estadoEfectivo(m) === "vigente"
+  )
+  const vencidas = todosMatriculados.filter(
+    m => estadoEfectivo(m) === "vencida"
+  )
+  const suspendidas = todosMatriculados.filter(
+    m => estadoEfectivo(m) === "suspendida"
+  )
+  const bajas = todosMatriculados.filter(
+    m => estadoEfectivo(m) === "baja"
+  )
+  const proximasAVencer =
+    todosMatriculados.filter(m => {
+      if (estadoEfectivo(m) !== "vigente") {
+        return false
+      }
+      const dias =
+        diasHastaVencimiento(
+          m.fecha_vencimiento
+        )
+      return (
+        dias !== null &&
+        dias >= 0 &&
+        dias <= 30
+      )
+    })
+
+  const listado = String(
+    parametros.listado ?? ""
+  )
+
+  const matriculadosListado =
+    listado === "vigentes"
+      ? vigentes
+      : listado === "vencidas"
+        ? vencidas
+        : listado === "suspendidas"
+          ? suspendidas
+          : listado === "bajas"
+            ? bajas
+            : listado === "proximas"
+              ? proximasAVencer
+              : []
+
+  const tituloListado =
+    listado === "vigentes"
+      ? "Matrículas vigentes"
+      : listado === "vencidas"
+        ? "Matrículas vencidas"
+        : listado === "suspendidas"
+          ? "Matrículas suspendidas"
+          : listado === "bajas"
+            ? "Matrículas dadas de baja"
+            : listado === "proximas"
+              ? "Próximas a vencer (30 días)"
+              : ""
 
   return (
     <main
       style={{
         minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "24px",
-        background:
-          "linear-gradient(180deg,#075985 0%,#0c4a6e 42%,#f4f7fb 42%)",
+        background: "#eef5fa",
+        fontFamily:
+          "Arial, sans-serif",
       }}
     >
-      <section
+      <header
         style={{
-          width: "100%",
-          maxWidth: "420px",
-          background: "white",
-          borderRadius: "22px",
-          padding: "28px",
-          boxShadow:
-            "0 20px 60px rgba(15,23,42,0.18)",
+          background: "#0d4f7c",
+          color: "white",
+          padding: "25px 40px",
+          borderBottom:
+            "4px solid #35c4cf",
+          display: "flex",
+          justifyContent:
+            "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
         }}
       >
-        <div
-          style={{
-            textAlign: "center",
-            marginBottom: "26px",
-          }}
-        >
-          <div
+        <div>
+          <h1
             style={{
-              fontSize: "38px",
+              margin: 0,
+              letterSpacing: "4px",
             }}
           >
-            ❄
-          </div>
-
-          <h1>RENACLI</h1>
+            RENACLI
+          </h1>
 
           <p
             style={{
-              color: "#64748b",
+              margin: "6px 0 0",
             }}
           >
-            Credencial Digital del Técnico
-            RENACLI
+            Registro Nacional de
+            Climatización y Refrigeración
           </p>
         </div>
 
-        <form
-          onSubmit={
-            enviarFormulario
-          }
-        >
-          <label>
-            <strong>
-              Número de matrícula
-            </strong>
-          </label>
-
-          <input
-            value={matricula}
-            onChange={(e) =>
-              setMatricula(
-                e.target.value.toUpperCase()
-              )
-            }
-            placeholder="RNC-000000"
-            required
-            style={{
-              width: "100%",
-              padding: "13px",
-              margin: "7px 0 18px",
-              border:
-                "1px solid #cbd5e1",
-              borderRadius: "10px",
-            }}
-          />
-
-          <label>
-            <strong>
-              Clave de acceso
-            </strong>
-          </label>
-
-          <input
-            type="password"
-            value={clave}
-            onChange={(e) =>
-              setClave(
-                e.target.value
-              )
-            }
-            required
-            style={{
-              width: "100%",
-              padding: "13px",
-              margin: "7px 0 20px",
-              border:
-                "1px solid #cbd5e1",
-              borderRadius: "10px",
-            }}
-          />
-
+        <form action={cerrarSesion}>
           <button
             type="submit"
-            disabled={
-              cargando ||
-              !dispositivoListo
-            }
             style={{
-              width: "100%",
-              padding: "13px",
-              border: 0,
-              borderRadius: "10px",
-              background: "#075985",
+              padding: "10px 16px",
+              borderRadius: "8px",
+              border:
+                "1px solid white",
+              background:
+                "transparent",
               color: "white",
               fontWeight: "bold",
-              cursor: cargando
-                ? "not-allowed"
-                : "pointer",
             }}
           >
-            {cargando
-              ? "Verificando..."
-              : "Ingresar"}
+            Cerrar sesión
           </button>
         </form>
+      </header>
 
-        {mensaje && (
+      <section
+        style={{
+          maxWidth: "1100px",
+          margin: "40px auto",
+          padding: "0 20px",
+        }}
+      >
+        <p
+          style={{
+            color: "#64748b",
+            fontSize: "13px",
+            fontWeight: "bold",
+            letterSpacing: "1px",
+          }}
+        >
+          ADMINISTRACIÓN
+        </p>
+
+        <h2
+          style={{
+            fontSize: "32px",
+            color: "#172033",
+          }}
+        >
+          Panel de matriculados
+        </h2>
+
+        {parametros.mensaje ===
+          "editado" && (
+          <Aviso
+            texto="Datos actualizados correctamente."
+            tipo="ok"
+          />
+        )}
+
+        {parametros.mensaje ===
+          "estado" && (
+          <Aviso
+            texto="Estado actualizado correctamente."
+            tipo="ok"
+          />
+        )}
+
+        {parametros.mensaje ===
+          "baja" && (
+          <Aviso
+            texto={
+              parametros.liberado === "1"
+                ? "Matrícula dada de baja. El número RNC quedó liberado y disponible para una futura asignación."
+                : "El matriculado fue dado de baja."
+            }
+            tipo="ok"
+          />
+        )}
+
+        {parametros.error ===
+          "baja" && (
+          <Aviso
+            texto="No fue posible completar la baja."
+            tipo="error"
+          />
+        )}
+
+        {parametros.error ===
+          "estado" && (
+          <Aviso
+            texto="No fue posible cambiar el estado."
+            tipo="error"
+          />
+        )}
+
+        {matriculadoEditar ? (
           <div
-            style={{
-              marginTop: "18px",
-              padding: "12px",
-              borderRadius: "10px",
-              textAlign: "center",
-              background:
-                tipoMensaje === "ok"
-                  ? "#dcfce7"
-                  : "#fee2e2",
-              color:
-                tipoMensaje === "ok"
-                  ? "#166534"
-                  : "#991b1b",
-            }}
+            style={tarjeta}
           >
-            {mensaje}
+            <h3>
+              Editar matriculado
+            </h3>
+
+            <p>
+              Matrícula:{" "}
+              <strong>
+                {matriculadoEditar.numero_matricula ||
+                  "Sin matrícula"}
+              </strong>
+            </p>
+
+            <form
+              action={
+                editarMatriculado
+              }
+            >
+              <input
+                type="hidden"
+                name="id"
+                value={
+                  matriculadoEditar.id
+                }
+              />
+
+              <div
+                style={grilla}
+              >
+                <Campo
+                  nombre="apellido_nombre"
+                  etiqueta="Apellido y nombre"
+                  valor={
+                    matriculadoEditar.apellido_nombre
+                  }
+                  requerido
+                />
+
+                <Campo
+                  nombre="dni"
+                  etiqueta="DNI"
+                  valor={
+                    matriculadoEditar.dni
+                  }
+                  requerido
+                />
+
+                <Campo
+                  nombre="telefono"
+                  etiqueta="Teléfono"
+                  valor={
+                    matriculadoEditar.telefono
+                  }
+                />
+
+                <Campo
+                  nombre="email"
+                  etiqueta="Email"
+                  tipo="email"
+                  valor={
+                    matriculadoEditar.email
+                  }
+                />
+
+                <Campo
+                  nombre="domicilio"
+                  etiqueta="Domicilio"
+                  valor={
+                    matriculadoEditar.domicilio
+                  }
+                />
+
+                <Campo
+                  nombre="localidad"
+                  etiqueta="Localidad"
+                  valor={
+                    matriculadoEditar.localidad
+                  }
+                  requerido
+                />
+
+                <Campo
+                  nombre="provincia"
+                  etiqueta="Provincia"
+                  valor={
+                    matriculadoEditar.provincia
+                  }
+                  requerido
+                />
+
+                <Campo
+                  nombre="especialidad"
+                  etiqueta="Especialidad"
+                  valor={
+                    matriculadoEditar.especialidad
+                  }
+                  requerido
+                />
+
+                <Campo
+                  nombre="fecha_emision"
+                  etiqueta="Fecha de emisión"
+                  tipo="date"
+                  valor={
+                    matriculadoEditar.fecha_emision
+                  }
+                />
+
+                <Campo
+                  nombre="fecha_vencimiento"
+                  etiqueta="Fecha de vencimiento"
+                  tipo="date"
+                  valor={
+                    matriculadoEditar.fecha_vencimiento
+                  }
+                />
+              </div>
+
+              <label
+                style={{
+                  display: "block",
+                  marginTop: "20px",
+                  fontWeight: "bold",
+                }}
+              >
+                Observaciones
+
+                <textarea
+                  name="observaciones"
+                  defaultValue={
+                    matriculadoEditar.observaciones ??
+                    ""
+                  }
+                  rows={4}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    boxSizing:
+                      "border-box",
+                    marginTop: "8px",
+                    padding: "13px",
+                    borderRadius: "8px",
+                    border:
+                      "1px solid #cbd5e1",
+                  }}
+                />
+              </label>
+
+              <div
+                style={botonera}
+              >
+                <button
+                  type="submit"
+                  style={botonAzul}
+                >
+                  Guardar cambios
+                </button>
+
+                <a
+                  href={`/administrador?buscar=1&q=${encodeURIComponent(
+                    terminoBusqueda ||
+                      matriculadoEditar.apellido_nombre ||
+                      ""
+                  )}`}
+                  style={botonBlanco}
+                >
+                  Cancelar
+                </a>
+              </div>
+            </form>
           </div>
+        ) : mostrarNuevo ? (
+          <div style={tarjeta}>
+            <h3>
+              Nuevo matriculado
+            </h3>
+
+            <form
+              action={
+                crearMatriculado
+              }
+            >
+              <div
+                style={grilla}
+              >
+                <Campo
+                  nombre="apellido_nombre"
+                  etiqueta="Apellido y nombre"
+                  requerido
+                />
+
+                <Campo
+                  nombre="dni"
+                  etiqueta="DNI"
+                  requerido
+                />
+
+                <Campo
+                  nombre="especialidad"
+                  etiqueta="Especialidad"
+                  requerido
+                />
+
+                <Campo
+                  nombre="telefono"
+                  etiqueta="Teléfono"
+                />
+
+                <Campo
+                  nombre="localidad"
+                  etiqueta="Localidad"
+                  requerido
+                />
+
+                <Campo
+                  nombre="provincia"
+                  etiqueta="Provincia"
+                  requerido
+                />
+
+                <Campo
+                  nombre="fecha_emision"
+                  etiqueta="Fecha de emisión"
+                  tipo="date"
+                  requerido
+                />
+
+                <Campo
+                  nombre="fecha_vencimiento"
+                  etiqueta="Fecha de vencimiento"
+                  tipo="date"
+                  requerido
+                />
+              </div>
+
+              <div
+                style={botonera}
+              >
+                <button
+                  style={botonAzul}
+                >
+                  Guardar y generar matrícula
+                </button>
+
+                <a
+                  href="/administrador"
+                  style={botonBlanco}
+                >
+                  Cancelar
+                </a>
+              </div>
+            </form>
+          </div>
+        ) : mostrarBusqueda ? (
+          <>
+            <div style={tarjeta}>
+              <h3>
+                Buscar matriculado
+              </h3>
+
+              <form
+                action="/administrador"
+                method="get"
+              >
+                <input
+                  type="hidden"
+                  name="buscar"
+                  value="1"
+                />
+
+                <div
+                  style={botonera}
+                >
+                  <input
+                    name="q"
+                    defaultValue={
+                      terminoBusqueda
+                    }
+                    placeholder="RNC, DNI, apellido o nombre"
+                    style={{
+                      flex:
+                        "1 1 350px",
+                      padding: "14px",
+                      borderRadius:
+                        "8px",
+                      border:
+                        "1px solid #cbd5e1",
+                    }}
+                  />
+
+                  <button
+                    style={botonAzul}
+                  >
+                    Buscar
+                  </button>
+
+                  <a
+                    href="/administrador"
+                    style={botonBlanco}
+                  >
+                    Volver
+                  </a>
+                </div>
+              </form>
+            </div>
+
+            {resultados.map(
+              matriculado => {
+                const estado =
+                  estadoEfectivo(
+                    matriculado
+                  )
+
+                const suspendida =
+                  estado.includes(
+                    "suspend"
+                  )
+
+                const baja =
+                  estado.includes(
+                    "baja"
+                  )
+
+                const confirmarBaja =
+                  Number(
+                    parametros.baja ??
+                      0
+                  ) ===
+                  matriculado.id
+
+                return (
+                  <div
+                    key={
+                      matriculado.id
+                    }
+                    style={{
+                      ...tarjeta,
+                      marginTop:
+                        "20px",
+                    }}
+                  >
+                    <h3>
+                      {
+                        matriculado.apellido_nombre
+                      }
+                    </h3>
+
+                    <p>
+                      <strong>
+                        {matriculado.numero_matricula ||
+                          "SIN MATRÍCULA"}
+                      </strong>
+                    </p>
+
+                    <div
+                      style={grilla}
+                    >
+                      <Dato
+                        titulo="DNI"
+                        valor={
+                          matriculado.dni
+                        }
+                      />
+
+                      <Dato
+                        titulo="Estado"
+                        valor={
+                          estadoEfectivo(
+                            matriculado
+                          )
+                        }
+                      />
+
+                      <Dato
+                        titulo="Teléfono"
+                        valor={
+                          matriculado.telefono
+                        }
+                      />
+
+                      <Dato
+                        titulo="Especialidad"
+                        valor={
+                          matriculado.especialidad
+                        }
+                      />
+
+                      <Dato
+                        titulo="Localidad"
+                        valor={
+                          matriculado.localidad
+                        }
+                      />
+
+                      <Dato
+                        titulo="Provincia"
+                        valor={
+                          matriculado.provincia
+                        }
+                      />
+
+                      <Dato
+                        titulo="Emisión"
+                        valor={formatearFecha(
+                          matriculado.fecha_emision
+                        )}
+                      />
+
+                      <Dato
+                        titulo="Vencimiento"
+                        valor={formatearFecha(
+                          matriculado.fecha_vencimiento
+                        )}
+                      />
+                    </div>
+
+                    {!baja && (
+                      <div
+                        style={botonera}
+                      >
+                        <a
+                          href={`/administrador?buscar=1&q=${encodeURIComponent(
+                            terminoBusqueda
+                          )}&editar=${
+                            matriculado.id
+                          }`}
+                          style={
+                            botonBlanco
+                          }
+                        >
+                          Editar
+                        </a>
+
+                        <form
+                          action={
+                            cambiarEstado
+                          }
+                        >
+                          <input
+                            type="hidden"
+                            name="id"
+                            value={
+                              matriculado.id
+                            }
+                          />
+
+                          <input
+                            type="hidden"
+                            name="q"
+                            value={
+                              terminoBusqueda
+                            }
+                          />
+
+                          <input
+                            type="hidden"
+                            name="estado"
+                            value={
+                              suspendida
+                                ? "vigente"
+                                : "suspendida"
+                            }
+                          />
+
+                          <button
+                            type="submit"
+                            style={
+                              suspendida
+                                ? botonVerde
+                                : botonAmarillo
+                            }
+                          >
+                            {suspendida
+                              ? "Rehabilitar"
+                              : "Suspender"}
+                          </button>
+                        </form>
+
+                        <a
+                          href={`/administrador?buscar=1&q=${encodeURIComponent(
+                            terminoBusqueda
+                          )}&baja=${
+                            matriculado.id
+                          }`}
+                          style={
+                            botonRojo
+                          }
+                        >
+                          Dar de baja
+                        </a>
+                      </div>
+                    )}
+
+                    {confirmarBaja &&
+                      !baja && (
+                        <div
+                          style={{
+                            marginTop:
+                              "20px",
+                            padding:
+                              "20px",
+                            background:
+                              "#fff1f2",
+                            border:
+                              "1px solid #fecdd3",
+                            borderRadius:
+                              "10px",
+                          }}
+                        >
+                          <strong>
+                            Confirmar baja
+                          </strong>
+
+                          <p>
+                            Esta acción
+                            dará de baja al
+                            matriculado y
+                            liberará el número{" "}
+                            <strong>
+                              {matriculado.numero_matricula}
+                            </strong>{" "}
+                            para que pueda
+                            asignarse en el
+                            futuro a otra
+                            persona.
+                          </p>
+
+                          <form
+                            action={
+                              darDeBaja
+                            }
+                          >
+                            <input
+                              type="hidden"
+                              name="id"
+                              value={
+                                matriculado.id
+                              }
+                            />
+
+                            <input
+                              type="hidden"
+                              name="q"
+                              value={
+                                terminoBusqueda
+                              }
+                            />
+
+                            <div
+                              style={
+                                botonera
+                              }
+                            >
+                              <button
+                                type="submit"
+                                style={
+                                  botonRojo
+                                }
+                              >
+                                Sí, dar de baja y liberar RNC
+                              </button>
+
+                              <a
+                                href={`/administrador?buscar=1&q=${encodeURIComponent(
+                                  terminoBusqueda
+                                )}`}
+                                style={
+                                  botonBlanco
+                                }
+                              >
+                                Cancelar
+                              </a>
+                            </div>
+                          </form>
+                        </div>
+                      )}
+                  </div>
+                )
+              }
+            )}
+          </>
+        ) : (
+          <>
+            <div style={tarjeta}>
+              <h3>
+                Gestión de matrículas
+              </h3>
+
+              <p>
+                El estado VENCIDA se calcula
+                automáticamente según la fecha de
+                vencimiento. Suspensión y baja
+                continúan siendo administrativas.
+              </p>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    "repeat(auto-fit,minmax(170px,1fr))",
+                  gap: "14px",
+                  marginTop: "24px",
+                }}
+              >
+                <Resumen
+                  titulo="Vigentes"
+                  cantidad={vigentes.length}
+                  href="/administrador?listado=vigentes"
+                />
+                <Resumen
+                  titulo="Vencidas"
+                  cantidad={vencidas.length}
+                  href="/administrador?listado=vencidas"
+                />
+                <Resumen
+                  titulo="Suspendidas"
+                  cantidad={suspendidas.length}
+                  href="/administrador?listado=suspendidas"
+                />
+                <Resumen
+                  titulo="Bajas"
+                  cantidad={bajas.length}
+                  href="/administrador?listado=bajas"
+                />
+                <Resumen
+                  titulo="Próximas a vencer"
+                  cantidad={proximasAVencer.length}
+                  href="/administrador?listado=proximas"
+                />
+              </div>
+
+              <div style={botonera}>
+                <a
+                  href="/administrador?nuevo=1"
+                  style={botonAzul}
+                >
+                  + Nuevo matriculado
+                </a>
+
+                <a
+                  href="/administrador?buscar=1"
+                  style={botonBlanco}
+                >
+                  Buscar matriculado
+                </a>
+              </div>
+            </div>
+
+            {tituloListado && (
+              <div
+                style={{
+                  ...tarjeta,
+                  marginTop: "22px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "12px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <h3 style={{ margin: 0 }}>
+                    {tituloListado}
+                  </h3>
+                  <a
+                    href="/administrador"
+                    style={botonBlanco}
+                  >
+                    Cerrar listado
+                  </a>
+                </div>
+
+                {matriculadosListado.length === 0 ? (
+                  <p style={{ marginTop: "22px" }}>
+                    No hay registros en este listado.
+                  </p>
+                ) : (
+                  <div style={{ marginTop: "22px" }}>
+                    {matriculadosListado.map(m => (
+                      <div
+                        key={m.id}
+                        style={{
+                          padding: "16px 0",
+                          borderBottom:
+                            "1px solid #e2e8f0",
+                        }}
+                      >
+                        <strong>
+                          {m.apellido_nombre ||
+                            "Sin nombre"}
+                        </strong>
+                        <div
+                          style={{
+                            marginTop: "5px",
+                            color: "#475569",
+                          }}
+                        >
+                          {m.numero_matricula ||
+                            "SIN MATRÍCULA"}{" "}
+                          · Estado:{" "}
+                          {estadoEfectivo(m)} · Vence:{" "}
+                          {formatearFecha(
+                            m.fecha_vencimiento
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            marginTop: "10px",
+                          }}
+                        >
+                          <a
+                            href={`/administrador?buscar=1&q=${encodeURIComponent(
+                              m.numero_matricula ||
+                                m.dni ||
+                                m.apellido_nombre ||
+                                ""
+                            )}`}
+                            style={{
+                              color: "#0d5689",
+                              fontWeight: "bold",
+                              textDecoration: "none",
+                            }}
+                          >
+                            Ver / administrar
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </section>
     </main>
+  )
+}
+
+function Campo({
+  nombre,
+  etiqueta,
+  tipo = "text",
+  requerido = false,
+  valor = null,
+}: {
+  nombre: string
+  etiqueta: string
+  tipo?: string
+  requerido?: boolean
+  valor?: string | null
+}) {
+  return (
+    <label
+      style={{
+        fontWeight: "bold",
+      }}
+    >
+      {etiqueta}
+      {requerido ? " *" : ""}
+
+      <input
+        name={nombre}
+        type={tipo}
+        required={requerido}
+        defaultValue={
+          tipo === "date" && valor
+            ? valor.slice(0, 10)
+            : valor ?? ""
+        }
+        style={{
+          display: "block",
+          width: "100%",
+          boxSizing: "border-box",
+          marginTop: "8px",
+          padding: "13px",
+          borderRadius: "8px",
+          border:
+            "1px solid #cbd5e1",
+        }}
+      />
+    </label>
   )
 }
 
@@ -1569,40 +1824,174 @@ function Dato({
   valor,
 }: {
   titulo: string
-  valor: string
+  valor: string | null
 }) {
   return (
-    <div
+    <div>
+      <strong>
+        {titulo}
+      </strong>
+
+      <div
+        style={{
+          marginTop: "5px",
+        }}
+      >
+        {valor || "-"}
+      </div>
+    </div>
+  )
+}
+
+function Resumen({
+  titulo,
+  cantidad,
+  href,
+}: {
+  titulo: string
+  cantidad: number
+  href: string
+}) {
+  return (
+    <a
+      href={href}
       style={{
-        padding: "12px",
-        borderRadius: "12px",
+        display: "block",
+        padding: "18px",
+        border: "1px solid #d7e0e7",
+        borderRadius: "10px",
         background: "#f8fafc",
-        border:
-          "1px solid #e2e8f0",
+        color: "#172033",
+        textDecoration: "none",
       }}
     >
       <div
         style={{
-          fontSize: "10px",
+          fontSize: "13px",
           color: "#64748b",
           fontWeight: "bold",
-          textTransform: "uppercase",
         }}
       >
         {titulo}
       </div>
-
       <div
         style={{
-          marginTop: "4px",
-          color: "#0f172a",
-          fontSize: "13px",
+          fontSize: "30px",
           fontWeight: "bold",
-          wordBreak: "break-word",
+          marginTop: "6px",
         }}
       >
-        {valor}
+        {cantidad}
       </div>
+    </a>
+  )
+}
+
+function Aviso({
+  texto,
+  tipo,
+}: {
+  texto: string
+  tipo: "ok" | "error"
+}) {
+  return (
+    <div
+      style={{
+        padding: "16px",
+        marginBottom: "22px",
+        borderRadius: "10px",
+        background:
+          tipo === "ok"
+            ? "#ecfdf5"
+            : "#fff1f2",
+        border:
+          tipo === "ok"
+            ? "1px solid #86efac"
+            : "1px solid #fecdd3",
+        color:
+          tipo === "ok"
+            ? "#166534"
+            : "#be123c",
+      }}
+    >
+      {texto}
     </div>
   )
+}
+
+const tarjeta = {
+  background: "white",
+  border: "1px solid #d7e0e7",
+  borderRadius: "14px",
+  padding: "30px",
+  boxShadow:
+    "0 2px 5px rgba(0,0,0,.08)",
+}
+
+const grilla = {
+  display: "grid",
+  gridTemplateColumns:
+    "repeat(auto-fit,minmax(220px,1fr))",
+  gap: "20px",
+}
+
+const botonera = {
+  display: "flex",
+  gap: "12px",
+  flexWrap: "wrap" as const,
+  marginTop: "25px",
+}
+
+const botonAzul = {
+  padding: "13px 20px",
+  border: "none",
+  borderRadius: "8px",
+  background: "#0d5689",
+  color: "white",
+  fontWeight: "bold",
+  textDecoration: "none",
+  cursor: "pointer",
+}
+
+const botonBlanco = {
+  padding: "13px 20px",
+  border:
+    "1px solid #cbd5e1",
+  borderRadius: "8px",
+  background: "white",
+  color: "#334155",
+  fontWeight: "bold",
+  textDecoration: "none",
+  cursor: "pointer",
+}
+
+const botonAmarillo = {
+  padding: "13px 20px",
+  border: "none",
+  borderRadius: "8px",
+  background: "#f59e0b",
+  color: "white",
+  fontWeight: "bold",
+  cursor: "pointer",
+}
+
+const botonVerde = {
+  padding: "13px 20px",
+  border: "none",
+  borderRadius: "8px",
+  background: "#15803d",
+  color: "white",
+  fontWeight: "bold",
+  cursor: "pointer",
+}
+
+const botonRojo = {
+  padding: "13px 20px",
+  border: "none",
+  borderRadius: "8px",
+  background: "#b91c1c",
+  color: "white",
+  fontWeight: "bold",
+  textDecoration: "none",
+  cursor: "pointer",
 }
