@@ -2,16 +2,70 @@
 
 import { FormEvent, useState } from "react"
 
+type ResultadoLogin = {
+  ok: boolean
+  mensaje?: string
+  tecnico?: {
+    id: number
+    matricula: string
+    nombre: string
+  }
+}
+
 export default function HomePage() {
   const [matricula, setMatricula] = useState("")
   const [clave, setClave] = useState("")
+  const [cargando, setCargando] = useState(false)
+  const [mensaje, setMensaje] = useState("")
+  const [tipoMensaje, setTipoMensaje] = useState<
+    "ok" | "error" | ""
+  >("")
 
-  function enviarFormulario(event: FormEvent) {
+  async function enviarFormulario(event: FormEvent) {
     event.preventDefault()
 
-    alert(
-      `Próximo paso: validar ${matricula} contra RENACLI`
-    )
+    setCargando(true)
+    setMensaje("")
+    setTipoMensaje("")
+
+    try {
+      const respuesta = await fetch("/api/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          matricula,
+          clave,
+        }),
+      })
+
+      const resultado: ResultadoLogin =
+        await respuesta.json()
+
+      if (!respuesta.ok || !resultado.ok) {
+        setTipoMensaje("error")
+        setMensaje(
+          resultado.mensaje ??
+            "No se pudo iniciar sesión."
+        )
+        return
+      }
+
+      setTipoMensaje("ok")
+      setMensaje(
+        `Acceso correcto. Bienvenido ${
+          resultado.tecnico?.nombre ?? ""
+        }`
+      )
+    } catch {
+      setTipoMensaje("error")
+      setMensaje(
+        "No se pudo conectar con RENACLI."
+      )
+    } finally {
+      setCargando(false)
+    }
   }
 
   return (
@@ -96,17 +150,23 @@ export default function HomePage() {
           <input
             value={matricula}
             onChange={(e) =>
-              setMatricula(e.target.value.toUpperCase())
+              setMatricula(
+                e.target.value.toUpperCase()
+              )
             }
             placeholder="RNC-000000"
             autoComplete="username"
             required
+            disabled={cargando}
             style={{
               width: "100%",
               padding: "13px 14px",
               border: "1px solid #cbd5e1",
               borderRadius: "10px",
               marginBottom: "18px",
+              background: cargando
+                ? "#f8fafc"
+                : "white",
             }}
           />
 
@@ -124,35 +184,71 @@ export default function HomePage() {
           <input
             type="password"
             value={clave}
-            onChange={(e) => setClave(e.target.value)}
+            onChange={(e) =>
+              setClave(e.target.value)
+            }
             placeholder="Ingresá tu clave"
             autoComplete="current-password"
             required
+            disabled={cargando}
             style={{
               width: "100%",
               padding: "13px 14px",
               border: "1px solid #cbd5e1",
               borderRadius: "10px",
               marginBottom: "20px",
+              background: cargando
+                ? "#f8fafc"
+                : "white",
             }}
           />
 
           <button
             type="submit"
+            disabled={cargando}
             style={{
               width: "100%",
               border: 0,
               borderRadius: "10px",
               padding: "13px 16px",
-              background: "#075985",
+              background: cargando
+                ? "#94a3b8"
+                : "#075985",
               color: "white",
               fontWeight: "bold",
-              cursor: "pointer",
+              cursor: cargando
+                ? "not-allowed"
+                : "pointer",
             }}
           >
-            Ingresar
+            {cargando
+              ? "Verificando..."
+              : "Ingresar"}
           </button>
         </form>
+
+        {mensaje && (
+          <div
+            style={{
+              marginTop: "18px",
+              padding: "12px 14px",
+              borderRadius: "10px",
+              background:
+                tipoMensaje === "ok"
+                  ? "#dcfce7"
+                  : "#fee2e2",
+              color:
+                tipoMensaje === "ok"
+                  ? "#166534"
+                  : "#991b1b",
+              fontSize: "13px",
+              fontWeight: "bold",
+              textAlign: "center",
+            }}
+          >
+            {mensaje}
+          </div>
+        )}
 
         <p
           style={{
@@ -163,8 +259,9 @@ export default function HomePage() {
             lineHeight: 1.5,
           }}
         >
-          Acceso exclusivo para técnicos con matrícula
-          RENACLI y clave asignada por Administración.
+          Acceso exclusivo para técnicos con
+          matrícula RENACLI y clave asignada por
+          Administración.
         </p>
       </section>
     </main>
