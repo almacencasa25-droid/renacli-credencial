@@ -3,17 +3,34 @@
 import {
   FormEvent,
   UIEvent,
+  useEffect,
   useState,
 } from "react"
+
+import QRCode from "qrcode"
+
+type Tecnico = {
+  id: number
+  matricula: string
+  nombre: string
+  foto: string | null
+  estado: string
+  especialidad: string | null
+  localidad: string | null
+  provincia: string | null
+  telefono: string | null
+  fechaEmision: string | null
+  fechaVencimiento: string | null
+  codigoVerificacion: string | null
+  urlVerificacion: string | null
+}
 
 type ResultadoLogin = {
   ok: boolean
   mensaje?: string
-  tecnico?: {
-    id: number
-    matricula: string
-    nombre: string
-  }
+
+  tecnico?: Tecnico
+
   consentimiento?: {
     aceptado: boolean
     autoriza_publicacion: boolean
@@ -188,9 +205,52 @@ por los medios de contacto publicados por RENACLI.
 FIN DE LA POLÍTICA DE PRIVACIDAD — VERSIÓN 1.0
 `
 
+function formatearFecha(fecha: string | null) {
+  if (!fecha) return "No informada"
+
+  const partes = fecha.split("-")
+
+  if (partes.length < 3) {
+    return fecha
+  }
+
+  const anio = partes[0]
+  const mes = partes[1]
+  const dia = partes[2].substring(0, 2)
+
+  return `${dia}/${mes}/${anio}`
+}
+
+function colorEstado(estado: string) {
+  const valor = estado.toLowerCase()
+
+  if (valor === "vigente") {
+    return {
+      fondo: "#dcfce7",
+      texto: "#166534",
+    }
+  }
+
+  if (
+    valor === "suspendida" ||
+    valor === "suspendido"
+  ) {
+    return {
+      fondo: "#fef3c7",
+      texto: "#92400e",
+    }
+  }
+
+  return {
+    fondo: "#fee2e2",
+    texto: "#991b1b",
+  }
+}
+
 export default function HomePage() {
   const [matricula, setMatricula] = useState("")
   const [clave, setClave] = useState("")
+
   const [cargando, setCargando] = useState(false)
   const [guardando, setGuardando] = useState(false)
 
@@ -200,7 +260,7 @@ export default function HomePage() {
   >("")
 
   const [tecnico, setTecnico] =
-    useState<ResultadoLogin["tecnico"]>()
+    useState<Tecnico | null>(null)
 
   const [
     requiereConsentimiento,
@@ -227,8 +287,62 @@ export default function HomePage() {
     setAceptaPrivacidad,
   ] = useState(false)
 
-  const [consentimientoGuardado, setConsentimientoGuardado] =
-    useState(false)
+  const [
+    consentimientoGuardado,
+    setConsentimientoGuardado,
+  ] = useState(false)
+
+  const [qrImagen, setQrImagen] = useState("")
+
+  const [ahora, setAhora] = useState(
+    new Date()
+  )
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setAhora(new Date())
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    async function generarQr() {
+      if (
+        !tecnico?.urlVerificacion ||
+        !consentimientoGuardado
+      ) {
+        setQrImagen("")
+        return
+      }
+
+      try {
+        const imagen =
+          await QRCode.toDataURL(
+            tecnico.urlVerificacion,
+            {
+              width: 420,
+              margin: 1,
+              errorCorrectionLevel: "M",
+            }
+          )
+
+        setQrImagen(imagen)
+      } catch (error) {
+        console.error(
+          "Error generando QR:",
+          error
+        )
+
+        setQrImagen("")
+      }
+    }
+
+    generarQr()
+  }, [
+    tecnico?.urlVerificacion,
+    consentimientoGuardado,
+  ])
 
   function detectarFinal(
     event: UIEvent<HTMLDivElement>,
@@ -237,7 +351,8 @@ export default function HomePage() {
     const elemento = event.currentTarget
 
     const llego =
-      elemento.scrollTop + elemento.clientHeight >=
+      elemento.scrollTop +
+        elemento.clientHeight >=
       elemento.scrollHeight - 8
 
     if (!llego) return
@@ -259,41 +374,63 @@ export default function HomePage() {
     setTipoMensaje("")
 
     try {
-      const respuesta = await fetch("/api/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          matricula,
-          clave,
-        }),
-      })
+      const respuesta = await fetch(
+        "/api/login",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            matricula,
+            clave,
+          }),
+        }
+      )
 
       const resultado: ResultadoLogin =
         await respuesta.json()
 
-      if (!respuesta.ok || !resultado.ok) {
+      if (
+        !respuesta.ok ||
+        !resultado.ok
+      ) {
         setTipoMensaje("error")
+
         setMensaje(
           resultado.mensaje ??
             "No se pudo iniciar sesión."
         )
+
+        return
+      }
+
+      if (!resultado.tecnico) {
+        setTipoMensaje("error")
+
+        setMensaje(
+          "No se pudieron obtener los datos del técnico."
+        )
+
         return
       }
 
       setTecnico(resultado.tecnico)
 
       if (
-        resultado.consentimiento?.aceptado !== true
+        resultado.consentimiento
+          ?.aceptado !== true
       ) {
         setRequiereConsentimiento(true)
+
         return
       }
 
       setConsentimientoGuardado(true)
     } catch {
       setTipoMensaje("error")
+
       setMensaje(
         "No se pudo conectar con RENACLI."
       )
@@ -313,6 +450,7 @@ export default function HomePage() {
 
     setGuardando(true)
     setMensaje("")
+    setTipoMensaje("")
 
     try {
       const respuesta = await fetch(
@@ -320,23 +458,36 @@ export default function HomePage() {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
+            "Content-Type":
+              "application/json",
           },
+
           body: JSON.stringify({
-            matriculadoId: tecnico.id,
+            matricula,
+            clave,
+
+            aceptaReglamento: true,
+            aceptaPrivacidad: true,
+
             autorizaPublicacion: true,
           }),
         }
       )
 
-      const resultado = await respuesta.json()
+      const resultado =
+        await respuesta.json()
 
-      if (!respuesta.ok || !resultado.ok) {
+      if (
+        !respuesta.ok ||
+        !resultado.ok
+      ) {
         setMensaje(
           resultado.mensaje ??
             "No se pudo guardar la aceptación."
         )
+
         setTipoMensaje("error")
+
         return
       }
 
@@ -346,94 +497,433 @@ export default function HomePage() {
       setMensaje(
         "No se pudo guardar la aceptación."
       )
+
       setTipoMensaje("error")
     } finally {
       setGuardando(false)
     }
   }
 
+  function cerrarSesion() {
+    setTecnico(null)
+    setConsentimientoGuardado(false)
+    setRequiereConsentimiento(false)
+
+    setMatricula("")
+    setClave("")
+
+    setAceptaReglamento(false)
+    setAceptaPrivacidad(false)
+
+    setLlegoFinalReglamento(false)
+    setLlegoFinalPrivacidad(false)
+
+    setQrImagen("")
+    setMensaje("")
+    setTipoMensaje("")
+  }
+
   if (
     consentimientoGuardado &&
     tecnico
   ) {
+    const colores =
+      colorEstado(tecnico.estado)
+
+    const ubicacion =
+      [
+        tecnico.localidad,
+        tecnico.provincia,
+      ]
+        .filter(Boolean)
+        .join(", ") ||
+      "No informada"
+
+    const fechaHora =
+      ahora.toLocaleString("es-AR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+
     return (
       <main
         style={{
           minHeight: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "24px",
-          background: "#f4f7fb",
+          padding: "18px",
+          background:
+            "linear-gradient(180deg,#075985 0%,#0c4a6e 34%,#eaf1f7 34%)",
         }}
       >
         <section
           style={{
             width: "100%",
-            maxWidth: "500px",
+            maxWidth: "480px",
+            margin: "0 auto",
+            overflow: "hidden",
             background: "white",
-            borderRadius: "22px",
-            padding: "30px",
-            textAlign: "center",
+            borderRadius: "24px",
             boxShadow:
-              "0 20px 60px rgba(15,23,42,0.12)",
+              "0 20px 60px rgba(15,23,42,0.22)",
           }}
         >
+          <header
+            style={{
+              padding: "24px 22px",
+              textAlign: "center",
+              background: "#082f49",
+              color: "white",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "34px",
+                lineHeight: 1,
+              }}
+            >
+              ❄
+            </div>
+
+            <h1
+              style={{
+                margin:
+                  "8px 0 2px 0",
+                fontSize: "31px",
+                letterSpacing: "1px",
+              }}
+            >
+              RENACLI
+            </h1>
+
+            <div
+              style={{
+                fontSize: "11px",
+                fontWeight: "bold",
+                letterSpacing: "0.7px",
+                opacity: 0.9,
+              }}
+            >
+              REGISTRO NACIONAL DE
+              CLIMATIZACIÓN Y REFRIGERACIÓN
+            </div>
+
+            <div
+              style={{
+                marginTop: "14px",
+                fontSize: "13px",
+                fontWeight: "bold",
+              }}
+            >
+              CREDENCIAL DIGITAL
+            </div>
+          </header>
+
           <div
             style={{
-              fontSize: "42px",
+              padding: "24px",
             }}
           >
-            ❄
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                marginBottom: "18px",
+              }}
+            >
+              {tecnico.foto ? (
+                <img
+                  src={tecnico.foto}
+                  alt={`Foto de ${tecnico.nombre}`}
+                  style={{
+                    width: "135px",
+                    height: "165px",
+                    objectFit: "cover",
+                    borderRadius: "18px",
+                    border:
+                      "4px solid #e2e8f0",
+                    boxShadow:
+                      "0 8px 20px rgba(15,23,42,0.12)",
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: "135px",
+                    height: "165px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent:
+                      "center",
+                    padding: "12px",
+                    textAlign: "center",
+                    color: "#64748b",
+                    background: "#f8fafc",
+                    border:
+                      "2px dashed #cbd5e1",
+                    borderRadius: "18px",
+                  }}
+                >
+                  Foto no cargada
+                </div>
+              )}
+            </div>
+
+            <h2
+              style={{
+                margin: 0,
+                textAlign: "center",
+                fontSize: "24px",
+                color: "#0f172a",
+              }}
+            >
+              {tecnico.nombre}
+            </h2>
+
+            <div
+              style={{
+                marginTop: "10px",
+                textAlign: "center",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "12px",
+                  color: "#64748b",
+                  fontWeight: "bold",
+                }}
+              >
+                MATRÍCULA
+              </div>
+
+              <div
+                style={{
+                  marginTop: "3px",
+                  fontSize: "27px",
+                  fontWeight: "900",
+                  color: "#075985",
+                  letterSpacing: "1px",
+                }}
+              >
+                {tecnico.matricula}
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                marginTop: "12px",
+              }}
+            >
+              <div
+                style={{
+                  padding:
+                    "8px 18px",
+                  borderRadius: "999px",
+                  fontWeight: "bold",
+                  fontSize: "14px",
+                  background:
+                    colores.fondo,
+                  color:
+                    colores.texto,
+                }}
+              >
+                ●{" "}
+                {tecnico.estado.toUpperCase()}
+              </div>
+            </div>
+
+            <div
+              style={{
+                marginTop: "22px",
+                display: "grid",
+                gridTemplateColumns:
+                  "1fr 1fr",
+                gap: "12px",
+              }}
+            >
+              <Dato
+                titulo="Especialidad"
+                valor={
+                  tecnico.especialidad ||
+                  "No informada"
+                }
+              />
+
+              <Dato
+                titulo="Ubicación"
+                valor={ubicacion}
+              />
+
+              <Dato
+                titulo="Emisión"
+                valor={formatearFecha(
+                  tecnico.fechaEmision
+                )}
+              />
+
+              <Dato
+                titulo="Vencimiento"
+                valor={formatearFecha(
+                  tecnico.fechaVencimiento
+                )}
+              />
+            </div>
+
+            <div
+              style={{
+                marginTop: "24px",
+                padding: "18px",
+                textAlign: "center",
+                background: "#f8fafc",
+                border:
+                  "1px solid #e2e8f0",
+                borderRadius: "18px",
+              }}
+            >
+              {qrImagen ? (
+                <img
+                  src={qrImagen}
+                  alt="Código QR de verificación"
+                  style={{
+                    width: "190px",
+                    height: "190px",
+                    display: "block",
+                    margin: "0 auto",
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    height: "190px",
+                    display: "flex",
+                    justifyContent:
+                      "center",
+                    alignItems: "center",
+                    color: "#64748b",
+                  }}
+                >
+                  Generando QR...
+                </div>
+              )}
+
+              <div
+                style={{
+                  marginTop: "8px",
+                  fontSize: "12px",
+                  color: "#475569",
+                  fontWeight: "bold",
+                }}
+              >
+                Escaneá para verificar esta
+                matrícula
+              </div>
+            </div>
+
+            <div
+              style={{
+                marginTop: "18px",
+                padding: "14px",
+                borderRadius: "14px",
+                background: "#eff6ff",
+                border:
+                  "1px solid #bfdbfe",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "11px",
+                  fontWeight: "bold",
+                  color: "#475569",
+                }}
+              >
+                FECHA Y HORA DE VISUALIZACIÓN
+              </div>
+
+              <div
+                style={{
+                  marginTop: "4px",
+                  fontWeight: "bold",
+                  color: "#0f172a",
+                }}
+              >
+                {fechaHora}
+              </div>
+
+              {tecnico.codigoVerificacion ? (
+                <>
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      fontSize: "11px",
+                      fontWeight: "bold",
+                      color: "#475569",
+                    }}
+                  >
+                    CÓDIGO DE VERIFICACIÓN
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "4px",
+                      fontSize: "11px",
+                      fontWeight: "bold",
+                      color: "#075985",
+                      wordBreak:
+                        "break-all",
+                    }}
+                  >
+                    {
+                      tecnico.codigoVerificacion
+                    }
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+            <div
+              style={{
+                marginTop: "18px",
+                padding: "12px",
+                textAlign: "center",
+                background: "#f1f5f9",
+                borderRadius: "12px",
+                color: "#475569",
+                fontSize: "11px",
+                lineHeight: 1.5,
+              }}
+            >
+              RENACLI es un sistema privado de
+              evaluación, acreditación y
+              registro. Esta matrícula no
+              sustituye habilitaciones,
+              licencias o registros exigidos
+              por autoridades competentes
+              cuando correspondan.
+            </div>
+
+            <button
+              type="button"
+              onClick={cerrarSesion}
+              style={{
+                width: "100%",
+                marginTop: "18px",
+                padding: "13px",
+                border:
+                  "1px solid #cbd5e1",
+                borderRadius: "11px",
+                background: "white",
+                color: "#334155",
+                fontWeight: "bold",
+                cursor: "pointer",
+              }}
+            >
+              Cerrar sesión
+            </button>
           </div>
-
-          <h1
-            style={{
-              marginBottom: "8px",
-            }}
-          >
-            RENACLI
-          </h1>
-
-          <div
-            style={{
-              marginTop: "20px",
-              padding: "18px",
-              borderRadius: "12px",
-              background: "#dcfce7",
-              color: "#166534",
-              fontWeight: "bold",
-            }}
-          >
-            Acceso habilitado correctamente
-          </div>
-
-          <h2
-            style={{
-              marginTop: "24px",
-            }}
-          >
-            {tecnico.nombre}
-          </h2>
-
-          <p
-            style={{
-              color: "#64748b",
-            }}
-          >
-            Matrícula {tecnico.matricula}
-          </p>
-
-          <p
-            style={{
-              marginTop: "24px",
-              color: "#475569",
-              lineHeight: 1.6,
-            }}
-          >
-            En el próximo paso mostraremos aquí
-            tu Credencial Digital RENACLI.
-          </p>
         </section>
       </main>
     )
@@ -505,7 +995,8 @@ export default function HomePage() {
             </strong>
 
             <div>
-              Matrícula: {tecnico.matricula}
+              Matrícula:{" "}
+              {tecnico.matricula}
             </div>
           </div>
 
@@ -788,7 +1279,8 @@ export default function HomePage() {
               color: "#64748b",
             }}
           >
-            Credencial Digital del Técnico RENACLI
+            Credencial Digital del Técnico
+            RENACLI
           </p>
         </div>
 
@@ -860,6 +1352,9 @@ export default function HomePage() {
               background: "#075985",
               color: "white",
               fontWeight: "bold",
+              cursor: cargando
+                ? "not-allowed"
+                : "pointer",
             }}
           >
             {cargando
@@ -890,5 +1385,48 @@ export default function HomePage() {
         )}
       </section>
     </main>
+  )
+}
+
+function Dato({
+  titulo,
+  valor,
+}: {
+  titulo: string
+  valor: string
+}) {
+  return (
+    <div
+      style={{
+        padding: "12px",
+        borderRadius: "12px",
+        background: "#f8fafc",
+        border:
+          "1px solid #e2e8f0",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "10px",
+          color: "#64748b",
+          fontWeight: "bold",
+          textTransform: "uppercase",
+        }}
+      >
+        {titulo}
+      </div>
+
+      <div
+        style={{
+          marginTop: "4px",
+          color: "#0f172a",
+          fontSize: "13px",
+          fontWeight: "bold",
+          wordBreak: "break-word",
+        }}
+      >
+        {valor}
+      </div>
+    </div>
   )
 }
