@@ -248,9 +248,37 @@ function colorEstado(estado: string) {
   }
 }
 
+function crearDispositivoId() {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID()
+  }
+
+  return (
+    "rnc-" +
+    Date.now().toString(36) +
+    "-" +
+    Math.random().toString(36).substring(2) +
+    "-" +
+    Math.random().toString(36).substring(2)
+  )
+}
+
 export default function HomePage() {
   const [matricula, setMatricula] = useState("")
   const [clave, setClave] = useState("")
+
+  const [
+    dispositivoId,
+    setDispositivoId,
+  ] = useState("")
+
+  const [
+    dispositivoListo,
+    setDispositivoListo,
+  ] = useState(false)
 
   const [cargando, setCargando] = useState(false)
   const [guardando, setGuardando] = useState(false)
@@ -305,10 +333,73 @@ export default function HomePage() {
   )
 
   /*
-   * Al abrir la aplicación comprobamos
-   * si este teléfono ya tiene una sesión.
+   * Creamos una identificación única
+   * para esta instalación/navegador.
+   *
+   * Se guarda localmente y no contiene
+   * la matrícula ni la contraseña.
    */
   useEffect(() => {
+    try {
+      const claveLocal =
+        "renacli_dispositivo_id"
+
+      const existente =
+        localStorage.getItem(claveLocal)
+
+      if (
+        existente &&
+        existente.trim().length >= 8
+      ) {
+        setDispositivoId(
+          existente.trim()
+        )
+
+        setDispositivoListo(true)
+        return
+      }
+
+      const nuevo =
+        crearDispositivoId()
+
+      localStorage.setItem(
+        claveLocal,
+        nuevo
+      )
+
+      setDispositivoId(nuevo)
+      setDispositivoListo(true)
+    } catch (error) {
+      console.error(
+        "Error creando identificador del dispositivo:",
+        error
+      )
+
+      /*
+       * Si localStorage fallara,
+       * generamos igualmente uno
+       * para evitar bloquear la pantalla.
+       */
+      const temporal =
+        crearDispositivoId()
+
+      setDispositivoId(temporal)
+      setDispositivoListo(true)
+    }
+  }, [])
+
+  /*
+   * Al abrir la aplicación comprobamos
+   * si este dispositivo ya tiene sesión.
+   */
+  useEffect(() => {
+    if (
+      !dispositivoListo ||
+      !dispositivoId
+    ) {
+      return
+    }
+
     async function comprobarSesion() {
       try {
         const respuesta = await fetch(
@@ -316,6 +407,11 @@ export default function HomePage() {
           {
             method: "GET",
             cache: "no-store",
+
+            headers: {
+              "x-renacli-device-id":
+                dispositivoId,
+            },
           }
         )
 
@@ -344,11 +440,11 @@ export default function HomePage() {
     }
 
     comprobarSesion()
-  }, [])
+  }, [
+    dispositivoListo,
+    dispositivoId,
+  ])
 
-  /*
-   * Reloj de la credencial.
-   */
   useEffect(() => {
     const timer = setInterval(() => {
       setAhora(new Date())
@@ -357,9 +453,6 @@ export default function HomePage() {
     return () => clearInterval(timer)
   }, [])
 
-  /*
-   * QR generado dentro de la aplicación.
-   */
   useEffect(() => {
     async function generarQr() {
       if (
@@ -423,6 +516,16 @@ export default function HomePage() {
   ) {
     event.preventDefault()
 
+    if (!dispositivoId) {
+      setTipoMensaje("error")
+
+      setMensaje(
+        "No se pudo identificar este dispositivo."
+      )
+
+      return
+    }
+
     setCargando(true)
     setMensaje("")
     setTipoMensaje("")
@@ -432,13 +535,16 @@ export default function HomePage() {
         "/api/login",
         {
           method: "POST",
+
           headers: {
             "Content-Type":
               "application/json",
           },
+
           body: JSON.stringify({
             matricula,
             clave,
+            dispositivoId,
           }),
         }
       )
@@ -510,6 +616,7 @@ export default function HomePage() {
         "/api/consentimiento",
         {
           method: "POST",
+
           headers: {
             "Content-Type":
               "application/json",
@@ -545,11 +652,6 @@ export default function HomePage() {
 
       setRequiereConsentimiento(false)
       setConsentimientoGuardado(true)
-
-      /*
-       * La clave deja de ser necesaria
-       * una vez completado el primer ingreso.
-       */
       setClave("")
     } catch {
       setMensaje(
@@ -562,11 +664,10 @@ export default function HomePage() {
     }
   }
 
-  /*
-   * Mientras comprobamos si ya existe
-   * una sesión, no mostramos el login.
-   */
-  if (comprobandoSesion) {
+  if (
+    comprobandoSesion ||
+    !dispositivoListo
+  ) {
     return (
       <main
         style={{
@@ -619,9 +720,6 @@ export default function HomePage() {
     )
   }
 
-  /*
-   * CREDENCIAL DIGITAL
-   */
   if (
     consentimientoGuardado &&
     tecnico
@@ -824,8 +922,7 @@ export default function HomePage() {
                   fontSize: "14px",
                   background:
                     colores.fondo,
-                  color:
-                    colores.texto,
+                  color: colores.texto,
                 }}
               >
                 ●{" "}
@@ -1007,10 +1104,6 @@ export default function HomePage() {
     )
   }
 
-  /*
-   * PRIMER INGRESO:
-   * REGLAMENTO Y PRIVACIDAD
-   */
   if (
     requiereConsentimiento &&
     tecnico
@@ -1317,9 +1410,6 @@ export default function HomePage() {
     )
   }
 
-  /*
-   * LOGIN - SOLO PARA PRIMER INGRESO
-   */
   return (
     <main
       style={{
@@ -1426,7 +1516,10 @@ export default function HomePage() {
 
           <button
             type="submit"
-            disabled={cargando}
+            disabled={
+              cargando ||
+              !dispositivoListo
+            }
             style={{
               width: "100%",
               padding: "13px",
