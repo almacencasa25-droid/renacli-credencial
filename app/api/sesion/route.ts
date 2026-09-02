@@ -6,6 +6,9 @@ import {
   timingSafeEqual,
 } from "crypto"
 
+const VERSION_REGLAMENTO_ACTUAL = "1.1"
+const VERSION_PRIVACIDAD_ACTUAL = "1.0"
+
 function crearFirmaAntigua(
   matriculadoId: number,
   secreto: string
@@ -385,14 +388,10 @@ export async function GET(
         matriculado
           .fecha_aceptacion_terminos
       ) &&
-      Boolean(
-        matriculado
-          .version_reglamento
-      ) &&
-      Boolean(
-        matriculado
-          .version_privacidad
-      )
+      matriculado.version_reglamento ===
+        VERSION_REGLAMENTO_ACTUAL &&
+      matriculado.version_privacidad ===
+        VERSION_PRIVACIDAD_ACTUAL
 
     const respuesta =
       NextResponse.json({
@@ -444,6 +443,21 @@ export async function GET(
         consentimiento: {
           aceptado:
             consentimientoAceptado,
+
+          requiereActualizacion:
+            !consentimientoAceptado,
+
+          versionReglamentoActual:
+            VERSION_REGLAMENTO_ACTUAL,
+
+          versionPrivacidadActual:
+            VERSION_PRIVACIDAD_ACTUAL,
+
+          versionReglamentoAceptada:
+            matriculado.version_reglamento,
+
+          versionPrivacidadAceptada:
+            matriculado.version_privacidad,
 
           autoriza_publicacion:
             matriculado
