@@ -35,11 +35,16 @@ type ResultadoLogin = {
   consentimiento?: {
     aceptado: boolean
     autoriza_publicacion: boolean
+    requiereActualizacion?: boolean
+    versionReglamentoActual?: string
+    versionPrivacidadActual?: string
+    versionReglamentoAceptada?: string | null
+    versionPrivacidadAceptada?: string | null
   }
 }
 
 const textoReglamento = `
-REGLAMENTO GENERAL RENACLI — Versión 1.0
+REGLAMENTO GENERAL RENACLI — Versión 1.1
 
 1. OBJETO
 RENACLI es un sistema privado de evaluación, acreditación,
@@ -102,13 +107,53 @@ mientras se analiza el caso.
 Cuando desaparezcan las causas que originaron la suspensión,
 RENACLI podrá rehabilitar la matrícula.
 
-13. BAJA DEFINITIVA
+13. BAJA Y BAJA DEFINITIVA
 Podrá disponerse la baja cuando corresponda conforme al
 reglamento, respetando el procedimiento aplicable.
+
+Cuando la baja responda a una medida disciplinaria, deberá
+respetarse el análisis del caso y el derecho a descargo que
+corresponda.
+
+La matrícula RNC asignada será única para su titular mientras
+mantenga la continuidad de su registro y cumpla las
+condiciones de renovación establecidas por RENACLI.
+
+La falta de renovación durante cinco (5) años consecutivos,
+contados desde la fecha de vencimiento de la última vigencia,
+podrá producir la baja definitiva por falta de renovación.
+
+Hasta que se cumpla dicho plazo de cinco (5) años
+consecutivos, el número RNC permanecerá reservado para su
+titular y no podrá ser asignado a otra persona.
+
+Producida la baja definitiva por falta de renovación y
+cumplido el plazo indicado, RENACLI podrá liberar el número
+RNC para una futura reasignación a otro técnico.
 
 14. EFECTOS DE LA BAJA
 Una matrícula dada de baja dejará de figurar como vigente y
 no podrá presentarse como activa.
+
+La credencial dejará de acreditar al titular como matriculado
+RENACLI vigente mientras se mantenga la baja.
+
+La baja común no libera el número RNC asignado. El número
+permanecerá reservado mientras no se cumplan cinco (5) años
+consecutivos sin renovación desde la fecha de vencimiento de
+la última vigencia.
+
+Cuando corresponda una baja definitiva por falta de
+renovación y el número sea liberado, RENACLI podrá
+reasignarlo a un nuevo titular. La reasignación no implica
+continuidad, identidad ni relación entre el nuevo titular y
+cualquier titular anterior de ese número.
+
+RENACLI podrá conservar internamente el historial
+administrativo y de asignaciones anteriores conforme a las
+reglas legales aplicables sobre conservación y protección de
+datos, a fin de mantener la trazabilidad de cada período de
+asignación.
 
 15. RENOVACIÓN
 La renovación podrá requerir actualización de documentación,
@@ -137,7 +182,7 @@ RENACLI podrá actualizar este reglamento. Cuando una nueva
 versión requiera nueva aceptación, el técnico deberá
 aceptarla antes de continuar utilizando la credencial.
 
-FIN DEL REGLAMENTO GENERAL — VERSIÓN 1.0
+FIN DEL REGLAMENTO GENERAL — VERSIÓN 1.1
 `
 
 const textoPrivacidad = `
@@ -394,6 +439,16 @@ export default function HomePage() {
   ] = useState(false)
 
   const [
+    actualizandoReglamento,
+    setActualizandoReglamento,
+  ] = useState(false)
+
+  const [
+    autorizaPublicacionActual,
+    setAutorizaPublicacionActual,
+  ] = useState(false)
+
+  const [
     llegoFinalReglamento,
     setLlegoFinalReglamento,
   ] = useState(false)
@@ -516,10 +571,23 @@ export default function HomePage() {
           resultado.sesion === true &&
           resultado.tecnico &&
           resultado.consentimiento
-            ?.aceptado === true
         ) {
           setTecnico(resultado.tecnico)
-          setConsentimientoGuardado(true)
+
+          setAutorizaPublicacionActual(
+            resultado.consentimiento
+              .autoriza_publicacion === true
+          )
+
+          if (
+            resultado.consentimiento
+              .aceptado === true
+          ) {
+            setConsentimientoGuardado(true)
+          } else {
+            setActualizandoReglamento(true)
+            setRequiereConsentimiento(true)
+          }
         }
       } catch (error) {
         console.error(
@@ -674,6 +742,13 @@ export default function HomePage() {
         resultado.consentimiento
           ?.aceptado !== true
       ) {
+        setActualizandoReglamento(false)
+
+        setAutorizaPublicacionActual(
+          resultado.consentimiento
+            ?.autoriza_publicacion === true
+        )
+
         setRequiereConsentimiento(true)
         return
       }
@@ -712,16 +787,23 @@ export default function HomePage() {
           headers: {
             "Content-Type":
               "application/json",
+
+            "x-renacli-device-id":
+              dispositivoId,
           },
 
           body: JSON.stringify({
             matricula,
             clave,
+            dispositivoId,
 
             aceptaReglamento: true,
             aceptaPrivacidad: true,
 
-            autorizaPublicacion: true,
+            autorizaPublicacion:
+              actualizandoReglamento
+                ? autorizaPublicacionActual
+                : true,
           }),
         }
       )
@@ -743,6 +825,7 @@ export default function HomePage() {
       }
 
       setRequiereConsentimiento(false)
+      setActualizandoReglamento(false)
       setConsentimientoGuardado(true)
       setClave("")
     } catch {
@@ -1273,9 +1356,40 @@ export default function HomePage() {
                 color: "#64748b",
               }}
             >
-              Primer ingreso
+              {actualizandoReglamento
+                ? "Actualización de Reglamento"
+                : "Primer ingreso"}
             </p>
           </div>
+
+          {actualizandoReglamento ? (
+            <div
+              style={{
+                padding: "14px",
+                background: "#fff7ed",
+                border: "1px solid #fdba74",
+                borderRadius: "12px",
+                marginBottom: "18px",
+                color: "#9a3412",
+                fontSize: "14px",
+                lineHeight: 1.55,
+              }}
+            >
+              <strong>
+                El Reglamento General RENACLI fue actualizado a la versión 1.1.
+              </strong>
+
+              <div
+                style={{
+                  marginTop: "6px",
+                }}
+              >
+                Para continuar utilizando tu credencial digital,
+                debés leer y aceptar la nueva versión. No es
+                necesario volver a ingresar tu matrícula ni tu clave.
+              </div>
+            </div>
+          ) : null}
 
           <div
             style={{
@@ -1370,7 +1484,7 @@ export default function HomePage() {
             />
 
             Acepto el Reglamento General
-            RENACLI versión 1.0
+            RENACLI versión 1.1
           </label>
 
           <h2
@@ -1472,13 +1586,9 @@ export default function HomePage() {
                   lineHeight: 1.55,
                 }}
               >
-                Al continuar, autorizás la
-                publicación de los datos
-                necesarios para la
-                identificación y verificación
-                pública de tu matrícula
-                RENACLI, conforme la Política
-                de Privacidad aceptada.
+                {actualizandoReglamento
+                  ? "Al continuar, confirmás la aceptación del Reglamento General RENACLI versión 1.1 y de la Política de Privacidad versión 1.0. Se conservará tu elección anterior respecto de la autorización de publicación."
+                  : "Al continuar, autorizás la publicación de los datos necesarios para la identificación y verificación pública de tu matrícula RENACLI, conforme la Política de Privacidad aceptada."}
               </div>
 
               <button
