@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
+const VERSION_REGLAMENTO = "1.1"
+const VERSION_PRIVACIDAD = "1.0"
+
 export async function POST(request: Request) {
   try {
     const body = await request.json()
@@ -160,10 +163,10 @@ export async function POST(request: Request) {
           autorizaPublicacion,
 
         p_version_reglamento:
-          "1.0",
+          VERSION_REGLAMENTO,
 
         p_version_privacidad:
-          "1.0",
+          VERSION_PRIVACIDAD,
 
         p_dispositivo_id:
           null,
