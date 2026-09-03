@@ -322,6 +322,7 @@ export async function GET(
         telefono,
         foto_url,
         fecha_emision,
+        fecha_ultima_acreditacion,
         fecha_vencimiento,
         estado,
         acepta_reglamento,
@@ -430,6 +431,7 @@ export async function GET(
             matriculado.telefono,
 
           fechaEmision:
+            matriculado.fecha_ultima_acreditacion ||
             matriculado.fecha_emision,
 
           fechaVencimiento:
