@@ -289,6 +289,54 @@ export async function POST(request: Request) {
         ? `https://renacli-web.vercel.app/verificar/${codigoVerificacion}`
         : null
 
+    /*
+     * El bucket de fotos es privado.
+     * Generamos una URL firmada temporal
+     * para el primer ingreso de la app.
+     */
+    let fotoFirmada: string | null = null
+
+    if (matriculado.foto_url) {
+      const marcador =
+        "/storage/v1/object/public/fotos-matriculados/"
+
+      const posicion =
+        matriculado.foto_url.indexOf(marcador)
+
+      const rutaFoto =
+        posicion >= 0
+          ? matriculado.foto_url
+              .slice(
+                posicion + marcador.length
+              )
+              .replace(/^\/+/, "")
+          : matriculado.foto_url
+              .replace(/^\/+/, "")
+
+      if (rutaFoto) {
+        const {
+          data: fotoFirmadaData,
+          error: errorFotoFirmada,
+        } = await supabase.storage
+          .from("fotos-matriculados")
+          .createSignedUrl(
+            rutaFoto,
+            60 * 60
+          )
+
+        if (errorFotoFirmada) {
+          console.error(
+            "Error generando URL firmada de la foto:",
+            errorFotoFirmada
+          )
+        } else {
+          fotoFirmada =
+            fotoFirmadaData?.signedUrl ||
+            null
+        }
+      }
+    }
+
     const consentimientoAceptado =
       matriculado.acepta_reglamento ===
         true &&
@@ -332,7 +380,7 @@ export async function POST(request: Request) {
             matriculado.apellido_nombre,
 
           foto:
-            matriculado.foto_url,
+            fotoFirmada,
 
           estado:
             matriculado.estado ||
