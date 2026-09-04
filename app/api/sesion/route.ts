@@ -392,8 +392,8 @@ export async function GET(
 
       const rutaFoto =
         posicion >= 0
-          ? matriculado.foto_url.slice(posicion + marcador.length).replace(/^\\/+/, "")
-          : matriculado.foto_url.replace(/^\\/+/, "")
+          ? matriculado.foto_url.slice(posicion + marcador.length).replace(/^\/+/, "")
+          : matriculado.foto_url.replace(/^\/+/, "")
 
       if (rutaFoto) {
         const { data: fotoFirmadaData, error: errorFotoFirmada } =
