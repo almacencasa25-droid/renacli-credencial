@@ -1,258 +1,76 @@
 import { NextResponse } from "next/server"
-import { cookies } from "next/headers"
 import { createClient } from "@supabase/supabase-js"
-import {
-  createHmac,
-  timingSafeEqual,
-} from "crypto"
+import { createHmac } from "crypto"
 
 const VERSION_REGLAMENTO_ACTUAL = "1.1"
 const VERSION_PRIVACIDAD_ACTUAL = "1.0"
 
-function crearFirmaAntigua(
-  matriculadoId: number,
-  secreto: string
-) {
-  return createHmac("sha256", secreto)
-    .update(String(matriculadoId))
-    .digest("hex")
-}
-
-function crearFirmaNueva(
+function crearFirma(
   matriculadoId: number,
   dispositivoId: string,
   secreto: string
 ) {
   return createHmac("sha256", secreto)
-    .update(
-      `${matriculadoId}:${dispositivoId}`
-    )
+    .update(`${matriculadoId}:${dispositivoId}`)
     .digest("hex")
 }
 
-function compararFirmas(
-  firmaRecibida: string,
-  firmaCorrecta: string
-) {
+export async function POST(request: Request) {
   try {
-    const recibida = Buffer.from(
-      firmaRecibida,
-      "hex"
-    )
+    const body = await request.json()
 
-    const correcta = Buffer.from(
-      firmaCorrecta,
-      "hex"
-    )
+    const matricula = String(
+      body.matricula ?? ""
+    ).trim()
+
+    const clave = String(
+      body.clave ?? ""
+    ).trim()
+
+    const dispositivoId = String(
+      body.dispositivoId ?? ""
+    ).trim()
+
+    if (!matricula || !clave) {
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "Ingresá matrícula y clave.",
+        },
+        { status: 400 }
+      )
+    }
 
     if (
-      recibida.length !==
-      correcta.length
+      !dispositivoId ||
+      dispositivoId.length < 8
     ) {
-      return false
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo identificar este dispositivo.",
+        },
+        { status: 400 }
+      )
     }
 
-    return timingSafeEqual(
-      recibida,
-      correcta
-    )
-  } catch {
-    return false
-  }
-}
-
-function eliminarSesion(
-  mensaje?: string
-) {
-  const respuesta =
-    NextResponse.json({
-      ok: true,
-      sesion: false,
-      mensaje,
-    })
-
-  respuesta.cookies.set(
-    "renacli_credencial_session",
-    "",
-    {
-      httpOnly: true,
-
-      secure:
-        process.env.NODE_ENV ===
-        "production",
-
-      sameSite: "strict",
-
-      path: "/",
-
-      maxAge: 0,
-    }
-  )
-
-  return respuesta
-}
-
-export async function GET(
-  request: Request
-) {
-  try {
     const supabaseUrl =
       process.env.NEXT_PUBLIC_SUPABASE_URL
 
     const supabaseSecret =
       process.env.SUPABASE_SECRET_KEY
 
-    if (
-      !supabaseUrl ||
-      !supabaseSecret
-    ) {
+    if (!supabaseUrl || !supabaseSecret) {
       return NextResponse.json(
         {
           ok: false,
-          sesion: false,
           mensaje:
             "La aplicación no está configurada correctamente.",
         },
         { status: 500 }
       )
-    }
-
-    /*
-     * El identificador lo envía la app
-     * desde el navegador actual.
-     */
-    const dispositivoId =
-      String(
-        request.headers.get(
-          "x-renacli-device-id"
-        ) ?? ""
-      ).trim()
-
-    if (
-      !dispositivoId ||
-      dispositivoId.length < 8
-    ) {
-      return eliminarSesion(
-        "No se pudo identificar este dispositivo."
-      )
-    }
-
-    const cookieStore =
-      await cookies()
-
-    const token =
-      cookieStore.get(
-        "renacli_credencial_session"
-      )?.value
-
-    if (!token) {
-      return NextResponse.json({
-        ok: true,
-        sesion: false,
-      })
-    }
-
-    const partes =
-      token.split(".")
-
-    /*
-     * Admitimos temporalmente dos
-     * formatos:
-     *
-     * ANTIGUO:
-     * id.firma
-     *
-     * NUEVO:
-     * id.dispositivo.firma
-     *
-     * Así podemos migrar la sesión
-     * que ya estaba abierta.
-     */
-    if (
-      partes.length !== 2 &&
-      partes.length !== 3
-    ) {
-      return eliminarSesion()
-    }
-
-    const matriculadoId =
-      Number(partes[0])
-
-    if (
-      !Number.isInteger(
-        matriculadoId
-      ) ||
-      matriculadoId <= 0
-    ) {
-      return eliminarSesion()
-    }
-
-    let necesitaMigracion =
-      false
-
-    /*
-     * SESIÓN ANTIGUA
-     */
-    if (partes.length === 2) {
-      const firmaRecibida =
-        partes[1]
-
-      const firmaCorrecta =
-        crearFirmaAntigua(
-          matriculadoId,
-          supabaseSecret
-        )
-
-      if (
-        !compararFirmas(
-          firmaRecibida,
-          firmaCorrecta
-        )
-      ) {
-        return eliminarSesion()
-      }
-
-      necesitaMigracion = true
-    }
-
-    /*
-     * SESIÓN NUEVA
-     */
-    if (partes.length === 3) {
-      const dispositivoGuardado =
-        partes[1]
-
-      const firmaRecibida =
-        partes[2]
-
-      /*
-       * La sesión pertenece a otro
-       * dispositivo.
-       */
-      if (
-        dispositivoGuardado !==
-        dispositivoId
-      ) {
-        return eliminarSesion(
-          "Esta sesión no pertenece a este dispositivo."
-        )
-      }
-
-      const firmaCorrecta =
-        crearFirmaNueva(
-          matriculadoId,
-          dispositivoGuardado,
-          supabaseSecret
-        )
-
-      if (
-        !compararFirmas(
-          firmaRecibida,
-          firmaCorrecta
-        )
-      ) {
-        return eliminarSesion()
-      }
     }
 
     const supabase = createClient(
@@ -267,12 +85,83 @@ export async function GET(
     )
 
     /*
-     * Comprobamos siempre contra
-     * Supabase que este sea el
-     * teléfono vinculado.
+     * Primero verificamos matrícula y clave.
+     */
+    const {
+      data,
+      error,
+    } = await supabase.rpc(
+      "verificar_acceso_app_tecnico",
+      {
+        p_numero_matricula: matricula,
+        p_clave: clave,
+      }
+    )
+
+    if (error) {
+      console.error(
+        "Error verificando acceso:",
+        error
+      )
+
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo verificar el acceso.",
+        },
+        { status: 500 }
+      )
+    }
+
+    const resultado =
+      Array.isArray(data) &&
+      data.length > 0
+        ? data[0]
+        : null
+
+    if (
+      !resultado ||
+      resultado.acceso_valido !== true
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "Matrícula o clave incorrecta.",
+        },
+        { status: 401 }
+      )
+    }
+
+    const matriculadoId =
+      Number(resultado.matriculado_id)
+
+    if (
+      !Number.isInteger(matriculadoId) ||
+      matriculadoId <= 0
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo identificar al técnico.",
+        },
+        { status: 500 }
+      )
+    }
+
+    /*
+     * Ahora comprobamos el teléfono.
      *
-     * Si todavía no hay ninguno,
-     * este queda vinculado.
+     * Primer ingreso:
+     * se vincula este dispositivo.
+     *
+     * Mismo teléfono:
+     * permite continuar.
+     *
+     * Otro teléfono:
+     * devuelve false.
      */
     const {
       data: dispositivoPermitido,
@@ -290,23 +179,36 @@ export async function GET(
 
     if (errorDispositivo) {
       console.error(
-        "Error verificando dispositivo de sesión:",
+        "Error vinculando dispositivo:",
         errorDispositivo
       )
 
-      return eliminarSesion(
-        "No se pudo verificar el dispositivo."
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo verificar el dispositivo.",
+        },
+        { status: 500 }
       )
     }
 
-    if (
-      dispositivoPermitido !== true
-    ) {
-      return eliminarSesion(
-        "Esta credencial está vinculada a otro dispositivo."
+    if (dispositivoPermitido !== true) {
+      return NextResponse.json(
+        {
+          ok: false,
+          codigo:
+            "DISPOSITIVO_NO_AUTORIZADO",
+          mensaje:
+            "Esta credencial ya se encuentra vinculada a otro dispositivo. Para utilizarla en un nuevo teléfono deberá solicitar la desvinculación a RENACLI.",
+        },
+        { status: 403 }
       )
     }
 
+    /*
+     * Consultamos los datos de la credencial.
+     */
     const {
       data: matriculado,
       error: errorMatriculado,
@@ -319,6 +221,7 @@ export async function GET(
         localidad,
         provincia,
         especialidad,
+        categoria_tecnica,
         telefono,
         foto_url,
         fecha_emision,
@@ -343,11 +246,18 @@ export async function GET(
       !matriculado
     ) {
       console.error(
-        "Error leyendo sesión del técnico:",
+        "Error leyendo datos del técnico:",
         errorMatriculado
       )
 
-      return eliminarSesion()
+      return NextResponse.json(
+        {
+          ok: false,
+          mensaje:
+            "No se pudo consultar el estado del técnico.",
+        },
+        { status: 500 }
+      )
     }
 
     const {
@@ -377,34 +287,53 @@ export async function GET(
 
     const urlVerificacion =
       codigoVerificacion
-        ? `https://renacli-web.vercel.app/verificar/${codigoVerificacion}`
+        ? `https://www.renacli.com.ar/verificar/${codigoVerificacion}`
         : null
 
     /*
      * El bucket de fotos es privado.
-     * Generamos una URL firmada temporal para mostrar la foto.
+     * Generamos una URL firmada temporal
+     * para el primer ingreso de la app.
      */
     let fotoFirmada: string | null = null
 
     if (matriculado.foto_url) {
-      const marcador = "/storage/v1/object/public/fotos-matriculados/"
-      const posicion = matriculado.foto_url.indexOf(marcador)
+      const marcador =
+        "/storage/v1/object/public/fotos-matriculados/"
+
+      const posicion =
+        matriculado.foto_url.indexOf(marcador)
 
       const rutaFoto =
         posicion >= 0
-          ? matriculado.foto_url.slice(posicion + marcador.length).replace(/^\/+/, "")
-          : matriculado.foto_url.replace(/^\/+/, "")
+          ? matriculado.foto_url
+              .slice(
+                posicion + marcador.length
+              )
+              .replace(/^\/+/, "")
+          : matriculado.foto_url
+              .replace(/^\/+/, "")
 
       if (rutaFoto) {
-        const { data: fotoFirmadaData, error: errorFotoFirmada } =
-          await supabase.storage
-            .from("fotos-matriculados")
-            .createSignedUrl(rutaFoto, 60 * 60)
+        const {
+          data: fotoFirmadaData,
+          error: errorFotoFirmada,
+        } = await supabase.storage
+          .from("fotos-matriculados")
+          .createSignedUrl(
+            rutaFoto,
+            60 * 60
+          )
 
         if (errorFotoFirmada) {
-          console.error("Error generando URL firmada de la foto:", errorFotoFirmada)
+          console.error(
+            "Error generando URL firmada de la foto:",
+            errorFotoFirmada
+          )
         } else {
-          fotoFirmada = fotoFirmadaData?.signedUrl || null
+          fotoFirmada =
+            fotoFirmadaData?.signedUrl ||
+            null
         }
       }
     }
@@ -423,22 +352,33 @@ export async function GET(
       matriculado.version_privacidad ===
         VERSION_PRIVACIDAD_ACTUAL
 
+    /*
+     * Creamos una sesión firmada
+     * vinculada también a este dispositivo.
+     *
+     * La contraseña NO se guarda.
+     */
+    const firma = crearFirma(
+      matriculado.id,
+      dispositivoId,
+      supabaseSecret
+    )
+
+    const token =
+      `${matriculado.id}.${dispositivoId}.${firma}`
+
     const respuesta =
       NextResponse.json({
         ok: true,
-        sesion: true,
 
         tecnico: {
-          id:
-            matriculado.id,
+          id: matriculado.id,
 
           matricula:
-            matriculado
-              .numero_matricula,
+            matriculado.numero_matricula,
 
           nombre:
-            matriculado
-              .apellido_nombre,
+            matriculado.apellido_nombre,
 
           foto:
             fotoFirmada,
@@ -449,6 +389,9 @@ export async function GET(
 
           especialidad:
             matriculado.especialidad,
+
+          categoriaTecnica:
+            matriculado.categoria_tecnica || "base",
 
           localidad:
             matriculado.localidad,
@@ -497,56 +440,37 @@ export async function GET(
         },
       })
 
-    /*
-     * Si veníamos de la sesión antigua,
-     * la reemplazamos automáticamente
-     * por una sesión vinculada al
-     * dispositivo actual.
-     */
-    if (necesitaMigracion) {
-      const firmaNueva =
-        crearFirmaNueva(
-          matriculadoId,
-          dispositivoId,
-          supabaseSecret
-        )
+    respuesta.cookies.set(
+      "renacli_credencial_session",
+      token,
+      {
+        httpOnly: true,
 
-      const tokenNuevo =
-        `${matriculadoId}.${dispositivoId}.${firmaNueva}`
+        secure:
+          process.env.NODE_ENV ===
+          "production",
 
-      respuesta.cookies.set(
-        "renacli_credencial_session",
-        tokenNuevo,
-        {
-          httpOnly: true,
+        sameSite: "strict",
 
-          secure:
-            process.env.NODE_ENV ===
-            "production",
+        path: "/",
 
-          sameSite: "strict",
-
-          path: "/",
-
-          maxAge:
-            60 * 60 * 24 * 365,
-        }
-      )
-    }
+        maxAge:
+          60 * 60 * 24 * 365,
+      }
+    )
 
     return respuesta
   } catch (error) {
     console.error(
-      "Error comprobando sesión:",
+      "Error inesperado en login:",
       error
     )
 
     return NextResponse.json(
       {
         ok: false,
-        sesion: false,
         mensaje:
-          "No se pudo comprobar la sesión.",
+          "Ocurrió un error al iniciar sesión.",
       },
       { status: 500 }
     )
