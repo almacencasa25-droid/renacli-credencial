@@ -221,6 +221,7 @@ export async function POST(request: Request) {
         localidad,
         provincia,
         especialidad,
+        categoria_tecnica,
         telefono,
         foto_url,
         fecha_emision,
@@ -286,7 +287,7 @@ export async function POST(request: Request) {
 
     const urlVerificacion =
       codigoVerificacion
-        ? `https://renacli-web.vercel.app/verificar/${codigoVerificacion}`
+        ? `https://www.renacli.com.ar/verificar/${codigoVerificacion}`
         : null
 
     /*
@@ -388,6 +389,9 @@ export async function POST(request: Request) {
 
           especialidad:
             matriculado.especialidad,
+
+          categoriaTecnica:
+            matriculado.categoria_tecnica || "base",
 
           localidad:
             matriculado.localidad,
