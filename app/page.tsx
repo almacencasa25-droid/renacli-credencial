@@ -16,6 +16,7 @@ type Tecnico = {
   foto: string | null
   estado: string
   especialidad: string | null
+  categoriaTecnica: "base" | "inverter" | "superior"
   localidad: string | null
   provincia: string | null
   telefono: string | null
@@ -475,6 +476,12 @@ export default function HomePage() {
 
   const [qrImagen, setQrImagen] = useState("")
 
+  const [estadoPdf, setEstadoPdf] = useState<
+    "sin_solicitud" | "solicitada" | "disponible"
+  >("sin_solicitud")
+  const [procesandoPdf, setProcesandoPdf] = useState(false)
+  const [mensajePdf, setMensajePdf] = useState("")
+
   const [ahora, setAhora] = useState(
     new Date()
   )
@@ -650,6 +657,131 @@ export default function HomePage() {
     tecnico?.urlVerificacion,
     consentimientoGuardado,
   ])
+
+  useEffect(() => {
+    if (!tecnico || !consentimientoGuardado || !dispositivoId) return
+
+    async function consultarEstadoPdf() {
+      try {
+        const respuesta = await fetch("/api/credencial-pdf", {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            "x-renacli-device-id": dispositivoId,
+          },
+        })
+
+        const datos = await respuesta.json()
+        if (!respuesta.ok || !datos.ok) return
+
+        if (datos.estado === "solicitada" || datos.estado === "disponible") {
+          setEstadoPdf(datos.estado)
+        } else {
+          setEstadoPdf("sin_solicitud")
+        }
+      } catch (error) {
+        console.error("No se pudo consultar el estado del PDF:", error)
+      }
+    }
+
+    consultarEstadoPdf()
+  }, [tecnico?.id, consentimientoGuardado, dispositivoId])
+
+  async function solicitarPdf() {
+    if (!dispositivoId) return
+
+    setProcesandoPdf(true)
+    setMensajePdf("")
+
+    try {
+      const respuesta = await fetch("/api/credencial-pdf", {
+        method: "POST",
+        headers: {
+          "x-renacli-device-id": dispositivoId,
+        },
+      })
+
+      const datos = await respuesta.json()
+      if (!respuesta.ok || !datos.ok) {
+        setMensajePdf(datos.mensaje || "No se pudo solicitar el PDF.")
+        return
+      }
+
+      setEstadoPdf(datos.estado === "disponible" ? "disponible" : "solicitada")
+      setMensajePdf(
+        datos.estado === "disponible"
+          ? "Tu PDF ya está disponible."
+          : "Solicitud enviada a RENACLI."
+      )
+    } catch {
+      setMensajePdf("No se pudo conectar con RENACLI.")
+    } finally {
+      setProcesandoPdf(false)
+    }
+  }
+
+  async function descargarPdf() {
+    if (!dispositivoId || !tecnico) return
+
+    setProcesandoPdf(true)
+    setMensajePdf("")
+
+    try {
+      const respuesta = await fetch("/api/credencial-pdf/descargar", {
+        method: "GET",
+        cache: "no-store",
+        headers: {
+          "x-renacli-device-id": dispositivoId,
+        },
+      })
+
+      if (!respuesta.ok) {
+        let texto = "No se pudo descargar el PDF."
+        try {
+          const datos = await respuesta.json()
+          if (datos?.mensaje) texto = datos.mensaje
+        } catch {}
+        setMensajePdf(texto)
+        return
+      }
+
+      const blob = await respuesta.blob()
+      const url = URL.createObjectURL(blob)
+      const nombre = `Credencial-RENACLI-${tecnico.matricula}.pdf`
+
+      const archivo = new File([blob], nombre, { type: "application/pdf" })
+      const navegador = navigator as Navigator & {
+        canShare?: (data?: ShareData) => boolean
+      }
+
+      if (navigator.share && (!navegador.canShare || navegador.canShare({ files: [archivo] }))) {
+        try {
+          await navigator.share({
+            title: `Credencial RENACLI ${tecnico.matricula}`,
+            files: [archivo],
+          })
+        } catch {
+          const enlace = document.createElement("a")
+          enlace.href = url
+          enlace.download = nombre
+          enlace.click()
+        }
+      } else {
+        const enlace = document.createElement("a")
+        enlace.href = url
+        enlace.download = nombre
+        enlace.click()
+      }
+
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+      setEstadoPdf("sin_solicitud")
+      setMensajePdf("PDF entregado. Podés solicitar uno nuevo cuando lo necesites.")
+    } catch {
+      setMensajePdf("No se pudo descargar el PDF.")
+    } finally {
+      setProcesandoPdf(false)
+    }
+  }
 
   function detectarFinal(
     event: UIEvent<HTMLDivElement>,
@@ -911,6 +1043,38 @@ export default function HomePage() {
     const colores =
       colorEstado(estadoEfectivo)
 
+    const categoria = tecnico.categoriaTecnica || "base"
+    const categoriaNombre =
+      categoria === "superior"
+        ? "SUPERIOR"
+        : categoria === "inverter"
+          ? "INVERTER"
+          : "BASE"
+    const categoriaDescripcion =
+      categoria === "superior"
+        ? "Incluye conocimientos de categoría Base e Inverter, equipos piso-techo, sistemas centrales y cámaras frigoríficas."
+        : categoria === "inverter"
+          ? "Técnico con conocimientos en tecnología Inverter."
+          : "Acreditación técnica Base RENACLI."
+    const colorPrincipal =
+      categoria === "superior"
+        ? "#a16207"
+        : categoria === "inverter"
+          ? "#166534"
+          : "#075985"
+    const colorCabecera =
+      categoria === "superior"
+        ? "#854d0e"
+        : categoria === "inverter"
+          ? "#14532d"
+          : "#082f49"
+    const fondoPagina =
+      categoria === "superior"
+        ? "linear-gradient(180deg,#a16207 0%,#713f12 34%,#f8f5ea 34%)"
+        : categoria === "inverter"
+          ? "linear-gradient(180deg,#15803d 0%,#14532d 34%,#edf7f0 34%)"
+          : "linear-gradient(180deg,#075985 0%,#0c4a6e 34%,#eaf1f7 34%)"
+
     const ubicacion =
       [
         tecnico.localidad,
@@ -935,8 +1099,7 @@ export default function HomePage() {
         style={{
           minHeight: "100vh",
           padding: "18px",
-          background:
-            "linear-gradient(180deg,#075985 0%,#0c4a6e 34%,#eaf1f7 34%)",
+          background: fondoPagina,
         }}
       >
         <section
@@ -955,7 +1118,7 @@ export default function HomePage() {
             style={{
               padding: "24px 22px",
               textAlign: "center",
-              background: "#082f49",
+              background: colorCabecera,
               color: "white",
             }}
           >
@@ -998,6 +1161,22 @@ export default function HomePage() {
               }}
             >
               CREDENCIAL DIGITAL
+            </div>
+
+            <div
+              style={{
+                display: "inline-block",
+                marginTop: "12px",
+                padding: "6px 13px",
+                borderRadius: "999px",
+                background: "rgba(255,255,255,0.16)",
+                border: "1px solid rgba(255,255,255,0.35)",
+                fontSize: "12px",
+                fontWeight: "900",
+                letterSpacing: "1px",
+              }}
+            >
+              CATEGORÍA {categoriaNombre}
             </div>
           </header>
 
@@ -1083,7 +1262,7 @@ export default function HomePage() {
                   marginTop: "3px",
                   fontSize: "27px",
                   fontWeight: "900",
-                  color: "#075985",
+                  color: colorPrincipal,
                   letterSpacing: "1px",
                 }}
               >
@@ -1132,6 +1311,24 @@ export default function HomePage() {
                 ⚠ {avisoVencimiento}
               </div>
             ) : null}
+
+            <div
+              style={{
+                marginTop: "18px",
+                padding: "13px 15px",
+                borderRadius: "14px",
+                background: categoria === "superior" ? "#fefce8" : categoria === "inverter" ? "#f0fdf4" : "#eff6ff",
+                border: `1px solid ${categoria === "superior" ? "#fde68a" : categoria === "inverter" ? "#86efac" : "#bfdbfe"}`,
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontWeight: "900", color: colorPrincipal }}>
+                CATEGORÍA TÉCNICA {categoriaNombre}
+              </div>
+              <div style={{ marginTop: "5px", fontSize: "12px", lineHeight: 1.45, color: "#475569" }}>
+                {categoriaDescripcion}
+              </div>
+            </div>
 
             <div
               style={{
@@ -1268,7 +1465,7 @@ export default function HomePage() {
                       marginTop: "4px",
                       fontSize: "11px",
                       fontWeight: "bold",
-                      color: "#075985",
+                      color: colorPrincipal,
                       wordBreak:
                         "break-all",
                     }}
@@ -1278,6 +1475,77 @@ export default function HomePage() {
                     }
                   </div>
                 </>
+              ) : null}
+            </div>
+
+            <div
+              style={{
+                marginTop: "18px",
+                padding: "15px",
+                borderRadius: "14px",
+                border: "1px solid #dbe4ec",
+                background: "#ffffff",
+                textAlign: "center",
+              }}
+            >
+              {estadoPdf === "sin_solicitud" ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={solicitarPdf}
+                    disabled={procesandoPdf}
+                    style={{
+                      border: `1px solid ${colorPrincipal}`,
+                      background: "white",
+                      color: colorPrincipal,
+                      borderRadius: "10px",
+                      padding: "9px 14px",
+                      fontSize: "12px",
+                      fontWeight: "bold",
+                      cursor: procesandoPdf ? "not-allowed" : "pointer",
+                      opacity: procesandoPdf ? 0.6 : 1,
+                    }}
+                  >
+                    {procesandoPdf ? "Enviando..." : "Solicitar credencial PDF"}
+                  </button>
+                  <div style={{ marginTop: "7px", fontSize: "11px", color: "#64748b" }}>
+                    RENACLI revisará la solicitud antes de habilitar el documento.
+                  </div>
+                </>
+              ) : estadoPdf === "solicitada" ? (
+                <div style={{ fontSize: "12px", fontWeight: "bold", color: "#92400e" }}>
+                  Solicitud de PDF enviada · pendiente de aprobación
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={descargarPdf}
+                    disabled={procesandoPdf}
+                    style={{
+                      border: 0,
+                      background: colorPrincipal,
+                      color: "white",
+                      borderRadius: "10px",
+                      padding: "10px 15px",
+                      fontSize: "12px",
+                      fontWeight: "bold",
+                      cursor: procesandoPdf ? "not-allowed" : "pointer",
+                      opacity: procesandoPdf ? 0.6 : 1,
+                    }}
+                  >
+                    {procesandoPdf ? "Preparando PDF..." : "Descargar / compartir PDF"}
+                  </button>
+                  <div style={{ marginTop: "7px", fontSize: "11px", color: "#64748b" }}>
+                    Una vez entregado, este PDF dejará de estar disponible en la app.
+                  </div>
+                </>
+              )}
+
+              {mensajePdf ? (
+                <div style={{ marginTop: "9px", fontSize: "11px", color: "#475569" }}>
+                  {mensajePdf}
+                </div>
               ) : null}
             </div>
 
