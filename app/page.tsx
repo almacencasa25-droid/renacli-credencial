@@ -268,7 +268,6 @@ function formatearFecha(fecha: string | null) {
   return `${dia}/${mes}/${anio}`
 }
 
-
 function obtenerEstadoYVencimiento(
   estadoOriginal: string,
   fechaVencimiento: string | null,
@@ -661,7 +660,14 @@ export default function HomePage() {
   useEffect(() => {
     if (!tecnico || !consentimientoGuardado || !dispositivoId) return
 
+    let activo = true
+    let consultando = false
+
     async function consultarEstadoPdf() {
+      if (consultando) return
+
+      consultando = true
+
       try {
         const respuesta = await fetch("/api/credencial-pdf", {
           method: "GET",
@@ -672,20 +678,90 @@ export default function HomePage() {
         })
 
         const datos = await respuesta.json()
-        if (!respuesta.ok || !datos.ok) return
 
-        if (datos.estado === "solicitada" || datos.estado === "disponible") {
+        if (
+          !activo ||
+          !respuesta.ok ||
+          !datos.ok
+        ) {
+          return
+        }
+
+        if (
+          datos.estado === "solicitada" ||
+          datos.estado === "disponible"
+        ) {
           setEstadoPdf(datos.estado)
+
+          if (datos.estado === "disponible") {
+            setMensajePdf(
+              "Tu PDF fue habilitado por RENACLI y ya está disponible para descargar."
+            )
+          }
         } else {
           setEstadoPdf("sin_solicitud")
         }
       } catch (error) {
-        console.error("No se pudo consultar el estado del PDF:", error)
+        console.error(
+          "No se pudo consultar el estado del PDF:",
+          error
+        )
+      } finally {
+        consultando = false
+      }
+    }
+
+    function consultarAlVolverALaApp() {
+      if (
+        document.visibilityState === "visible"
+      ) {
+        consultarEstadoPdf()
       }
     }
 
     consultarEstadoPdf()
-  }, [tecnico?.id, consentimientoGuardado, dispositivoId])
+
+    const intervalo =
+      estadoPdf === "solicitada"
+        ? window.setInterval(
+            consultarEstadoPdf,
+            5000
+          )
+        : null
+
+    window.addEventListener(
+      "focus",
+      consultarEstadoPdf
+    )
+
+    document.addEventListener(
+      "visibilitychange",
+      consultarAlVolverALaApp
+    )
+
+    return () => {
+      activo = false
+
+      if (intervalo !== null) {
+        window.clearInterval(intervalo)
+      }
+
+      window.removeEventListener(
+        "focus",
+        consultarEstadoPdf
+      )
+
+      document.removeEventListener(
+        "visibilitychange",
+        consultarAlVolverALaApp
+      )
+    }
+  }, [
+    tecnico?.id,
+    consentimientoGuardado,
+    dispositivoId,
+    estadoPdf,
+  ])
 
   async function solicitarPdf() {
     if (!dispositivoId) return
