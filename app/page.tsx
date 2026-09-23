@@ -479,6 +479,7 @@ export default function HomePage() {
   const [venceValoracion, setVenceValoracion] = useState("")
   const [generandoValoracion, setGenerandoValoracion] = useState(false)
   const [mensajeValoracion, setMensajeValoracion] = useState("")
+  const [pasoAvisoValoracion, setPasoAvisoValoracion] = useState<0 | 1 | 2>(0)
 
   const [estadoPdf, setEstadoPdf] = useState<
     "sin_solicitud" | "solicitada" | "disponible"
@@ -623,6 +624,35 @@ export default function HomePage() {
 
     return () => clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    if (!tecnico || !consentimientoGuardado) return
+
+    try {
+      const avisoLeido = localStorage.getItem(
+        "renacli_aviso_valoracion_v1"
+      )
+
+      if (avisoLeido !== "leido") {
+        setPasoAvisoValoracion(1)
+      }
+    } catch {
+      setPasoAvisoValoracion(1)
+    }
+  }, [tecnico?.id, consentimientoGuardado])
+
+  function confirmarAvisoValoracion() {
+    try {
+      localStorage.setItem(
+        "renacli_aviso_valoracion_v1",
+        "leido"
+      )
+    } catch {
+      // El aviso igualmente se cierra si el almacenamiento no está disponible.
+    }
+
+    setPasoAvisoValoracion(0)
+  }
 
   useEffect(() => {
     async function generarQr() {
@@ -1744,6 +1774,174 @@ export default function HomePage() {
               <button type="button" onClick={() => setQrValoracion("")} style={{ marginTop: "18px", border: "1px solid #cbd5e1", borderRadius: "9px", background: "white", color: "#334155", padding: "9px 18px", fontWeight: "bold", cursor: "pointer" }}>
                 Cerrar
               </button>
+            </div>
+          </div>
+        ) : null}
+
+        {pasoAvisoValoracion > 0 && !qrValoracion ? (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Actualización de la credencial"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 60,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "18px",
+              background: "rgba(15,23,42,0.78)",
+            }}
+          >
+            <div
+              style={{
+                width: "100%",
+                maxWidth: "390px",
+                borderRadius: "20px",
+                background: "white",
+                padding: "26px 24px",
+                textAlign: "center",
+                boxShadow: "0 20px 60px rgba(0,0,0,.3)",
+              }}
+            >
+              {pasoAvisoValoracion === 1 ? (
+                <>
+                  <div style={{ fontSize: "38px", lineHeight: 1 }}>★</div>
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      color: "#15803d",
+                      fontSize: "11px",
+                      fontWeight: "900",
+                      letterSpacing: "0.08em",
+                    }}
+                  >
+                    ACTUALIZACIÓN DE LA CREDENCIAL
+                  </div>
+                  <h2
+                    style={{
+                      margin: "8px 0 0",
+                      color: "#0f172a",
+                      fontSize: "22px",
+                    }}
+                  >
+                    ¡Enhorabuena! Incorporamos un botón para valorar tu trabajo
+                  </h2>
+                  <p
+                    style={{
+                      margin: "12px 0 0",
+                      color: "#475569",
+                      fontSize: "14px",
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    Al final de tu credencial agregamos el botón verde
+                    <strong> “Solicitar valoración”</strong>. Podés usarlo para que
+                    un cliente valore un trabajo que realizaste.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setPasoAvisoValoracion(2)}
+                    style={{
+                      marginTop: "20px",
+                      width: "100%",
+                      border: 0,
+                      borderRadius: "10px",
+                      background: "#15803d",
+                      color: "white",
+                      padding: "12px 18px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Ver cómo funciona
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: "36px", lineHeight: 1 }}>▣</div>
+                  <h2
+                    style={{
+                      margin: "12px 0 0",
+                      color: "#0f172a",
+                      fontSize: "22px",
+                    }}
+                  >
+                    ¿Cómo solicitar una valoración?
+                  </h2>
+                  <div
+                    style={{
+                      marginTop: "16px",
+                      display: "grid",
+                      gap: "10px",
+                      textAlign: "left",
+                    }}
+                  >
+                    {[
+                      "Al terminar un trabajo, tocá “Solicitar valoración” al final de la credencial.",
+                      "Mostrale al cliente el QR que aparece en pantalla.",
+                      "El cliente lo escanea, elige las estrellas y envía su opinión sin correo ni instalación.",
+                      "Cada QR dura 24 horas y admite una sola valoración.",
+                    ].map((texto, indice) => (
+                      <div
+                        key={texto}
+                        style={{
+                          display: "flex",
+                          gap: "10px",
+                          alignItems: "flex-start",
+                          color: "#475569",
+                          fontSize: "13px",
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        <span
+                          style={{
+                            minWidth: "24px",
+                            height: "24px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            borderRadius: "999px",
+                            background: "#dcfce7",
+                            color: "#166534",
+                            fontWeight: "900",
+                          }}
+                        >
+                          {indice + 1}
+                        </span>
+                        <span>{texto}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={confirmarAvisoValoracion}
+                    style={{
+                      marginTop: "20px",
+                      width: "100%",
+                      border: 0,
+                      borderRadius: "10px",
+                      background: "#15803d",
+                      color: "white",
+                      padding: "12px 18px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Entendido
+                  </button>
+                  <p
+                    style={{
+                      margin: "9px 0 0",
+                      color: "#64748b",
+                      fontSize: "11px",
+                    }}
+                  >
+                    Este aviso no volverá a mostrarse en este teléfono.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         ) : null}
