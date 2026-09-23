@@ -480,6 +480,8 @@ export default function HomePage() {
   const [generandoValoracion, setGenerandoValoracion] = useState(false)
   const [mensajeValoracion, setMensajeValoracion] = useState("")
   const [pasoAvisoValoracion, setPasoAvisoValoracion] = useState<0 | 1 | 2>(0)
+  const [instalacionNueva, setInstalacionNueva] = useState(false)
+  const [pasoBienvenida, setPasoBienvenida] = useState<0 | 1 | 2 | 3>(0)
 
   const [estadoPdf, setEstadoPdf] = useState<
     "sin_solicitud" | "solicitada" | "disponible"
@@ -521,6 +523,8 @@ export default function HomePage() {
       const nuevo =
         crearDispositivoId()
 
+      setInstalacionNueva(true)
+
       localStorage.setItem(
         claveLocal,
         nuevo
@@ -542,6 +546,7 @@ export default function HomePage() {
       const temporal =
         crearDispositivoId()
 
+      setInstalacionNueva(true)
       setDispositivoId(temporal)
       setDispositivoListo(true)
     }
@@ -628,6 +633,8 @@ export default function HomePage() {
   useEffect(() => {
     if (!tecnico || !consentimientoGuardado) return
 
+    if (instalacionNueva) return
+
     try {
       const avisoLeido = localStorage.getItem(
         "renacli_aviso_valoracion_v1"
@@ -639,7 +646,46 @@ export default function HomePage() {
     } catch {
       setPasoAvisoValoracion(1)
     }
-  }, [tecnico?.id, consentimientoGuardado])
+  }, [tecnico?.id, consentimientoGuardado, instalacionNueva])
+
+  useEffect(() => {
+    if (
+      !tecnico ||
+      !consentimientoGuardado ||
+      !instalacionNueva
+    ) {
+      return
+    }
+
+    try {
+      const bienvenidaLeida = localStorage.getItem(
+        "renacli_bienvenida_credencial_v1"
+      )
+
+      if (bienvenidaLeida !== "leida") {
+        setPasoBienvenida(1)
+      }
+    } catch {
+      setPasoBienvenida(1)
+    }
+  }, [tecnico?.id, consentimientoGuardado, instalacionNueva])
+
+  function confirmarBienvenida() {
+    try {
+      localStorage.setItem(
+        "renacli_bienvenida_credencial_v1",
+        "leida"
+      )
+      localStorage.setItem(
+        "renacli_aviso_valoracion_v1",
+        "leido"
+      )
+    } catch {
+      // La guía igualmente se cierra si el almacenamiento no está disponible.
+    }
+
+    setPasoBienvenida(0)
+  }
 
   function confirmarAvisoValoracion() {
     try {
@@ -1778,7 +1824,92 @@ export default function HomePage() {
           </div>
         ) : null}
 
-        {pasoAvisoValoracion > 0 && !qrValoracion ? (
+        {pasoBienvenida > 0 && !qrValoracion ? (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Guía de la credencial digital"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 70,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "18px",
+              background: "rgba(15,23,42,0.78)",
+            }}
+          >
+            <div
+              style={{
+                width: "100%",
+                maxWidth: "400px",
+                borderRadius: "20px",
+                background: "white",
+                padding: "26px 24px",
+                textAlign: "center",
+                boxShadow: "0 20px 60px rgba(0,0,0,.3)",
+              }}
+            >
+              <div
+                style={{
+                  color: "#075985",
+                  fontSize: "11px",
+                  fontWeight: "900",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                GUÍA INICIAL · {pasoBienvenida} DE 3
+              </div>
+
+              {pasoBienvenida === 1 ? (
+                <>
+                  <div style={{ marginTop: "12px", fontSize: "38px" }}>❄</div>
+                  <h2 style={{ margin: "8px 0 0", color: "#0f172a", fontSize: "23px" }}>
+                    Tu credencial digital RENACLI
+                  </h2>
+                  <p style={{ margin: "12px 0 0", color: "#475569", fontSize: "14px", lineHeight: 1.55 }}>
+                    Esta credencial identifica tu matrícula, categoría, estado y vigencia. El QR institucional permite que cualquier persona compruebe su autenticidad directamente en RENACLI.
+                  </p>
+                  <button type="button" onClick={() => setPasoBienvenida(2)} style={{ marginTop: "20px", width: "100%", border: 0, borderRadius: "10px", background: "#075985", color: "white", padding: "12px 18px", fontWeight: "bold", cursor: "pointer" }}>
+                    Siguiente
+                  </button>
+                </>
+              ) : pasoBienvenida === 2 ? (
+                <>
+                  <div style={{ marginTop: "12px", fontSize: "38px" }}>▤</div>
+                  <h2 style={{ margin: "8px 0 0", color: "#0f172a", fontSize: "23px" }}>
+                    PDF de la credencial
+                  </h2>
+                  <p style={{ margin: "12px 0 0", color: "#475569", fontSize: "14px", lineHeight: 1.55 }}>
+                    Desde el botón <strong>“Solicitar credencial PDF”</strong> podés pedir una copia. RENACLI revisará la solicitud y, cuando quede habilitada, podrás descargarla o compartirla desde esta aplicación.
+                  </p>
+                  <button type="button" onClick={() => setPasoBienvenida(3)} style={{ marginTop: "20px", width: "100%", border: 0, borderRadius: "10px", background: "#075985", color: "white", padding: "12px 18px", fontWeight: "bold", cursor: "pointer" }}>
+                    Siguiente
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ marginTop: "12px", fontSize: "38px", color: "#eab308" }}>★</div>
+                  <h2 style={{ margin: "8px 0 0", color: "#0f172a", fontSize: "23px" }}>
+                    Valoración de tu trabajo
+                  </h2>
+                  <p style={{ margin: "12px 0 0", color: "#475569", fontSize: "14px", lineHeight: 1.55 }}>
+                    Al finalizar un trabajo, tocá el botón verde <strong>“Solicitar valoración”</strong> y mostrale el QR al cliente. Podrá calificarte sin instalar otra aplicación ni ingresar su correo. El QR dura 24 horas y acepta una sola valoración.
+                  </p>
+                  <button type="button" onClick={confirmarBienvenida} style={{ marginTop: "20px", width: "100%", border: 0, borderRadius: "10px", background: "#15803d", color: "white", padding: "12px 18px", fontWeight: "bold", cursor: "pointer" }}>
+                    Entendido
+                  </button>
+                  <p style={{ margin: "9px 0 0", color: "#64748b", fontSize: "11px" }}>
+                    Esta guía se muestra una sola vez en este teléfono.
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {pasoAvisoValoracion > 0 && !qrValoracion && pasoBienvenida === 0 ? (
           <div
             role="dialog"
             aria-modal="true"
