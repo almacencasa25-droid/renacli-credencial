@@ -475,6 +475,11 @@ export default function HomePage() {
 
   const [qrImagen, setQrImagen] = useState("")
 
+  const [qrValoracion, setQrValoracion] = useState("")
+  const [venceValoracion, setVenceValoracion] = useState("")
+  const [generandoValoracion, setGenerandoValoracion] = useState(false)
+  const [mensajeValoracion, setMensajeValoracion] = useState("")
+
   const [estadoPdf, setEstadoPdf] = useState<
     "sin_solicitud" | "solicitada" | "disponible"
   >("sin_solicitud")
@@ -793,6 +798,35 @@ export default function HomePage() {
       setMensajePdf("No se pudo conectar con RENACLI.")
     } finally {
       setProcesandoPdf(false)
+    }
+  }
+
+  async function solicitarValoracion() {
+    if (!dispositivoId) return
+    setGenerandoValoracion(true)
+    setMensajeValoracion("")
+
+    try {
+      const respuesta = await fetch("/api/valoraciones/solicitar", {
+        method: "POST",
+        headers: { "x-renacli-device-id": dispositivoId },
+      })
+      const datos = await respuesta.json()
+      if (!respuesta.ok || !datos.ok) {
+        setMensajeValoracion(datos.mensaje || "No se pudo generar el QR.")
+        return
+      }
+      const imagen = await QRCode.toDataURL(datos.url, {
+        width: 500,
+        margin: 1,
+        errorCorrectionLevel: "M",
+      })
+      setQrValoracion(imagen)
+      setVenceValoracion(datos.venceEn)
+    } catch {
+      setMensajeValoracion("No se pudo conectar con RENACLI.")
+    } finally {
+      setGenerandoValoracion(false)
     }
   }
 
@@ -1645,8 +1679,74 @@ export default function HomePage() {
               por autoridades competentes
               cuando correspondan.
             </div>
+
+            <div style={{ marginTop: "20px", textAlign: "center" }}>
+              <button
+                type="button"
+                onClick={solicitarValoracion}
+                disabled={generandoValoracion}
+                style={{
+                  border: 0,
+                  borderRadius: "10px",
+                  background: "#15803d",
+                  color: "white",
+                  padding: "10px 18px",
+                  fontSize: "13px",
+                  fontWeight: "bold",
+                  cursor: generandoValoracion ? "not-allowed" : "pointer",
+                  opacity: generandoValoracion ? 0.65 : 1,
+                }}
+              >
+                {generandoValoracion ? "Generando..." : "Solicitar valoración"}
+              </button>
+              <div style={{ marginTop: "7px", color: "#64748b", fontSize: "11px" }}>
+                Generá un QR independiente para el trabajo realizado.
+              </div>
+              {mensajeValoracion ? (
+                <div style={{ marginTop: "8px", color: "#b91c1c", fontSize: "12px", fontWeight: "bold" }}>
+                  {mensajeValoracion}
+                </div>
+              ) : null}
+            </div>
           </div>
         </section>
+
+        {qrValoracion ? (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="QR para valorar el trabajo"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 50,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "18px",
+              background: "rgba(15,23,42,0.78)",
+            }}
+          >
+            <div style={{ width: "100%", maxWidth: "380px", borderRadius: "20px", background: "white", padding: "24px", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
+              <h2 style={{ margin: 0, color: "#0f172a", fontSize: "21px" }}>Valorar este trabajo</h2>
+              <p style={{ margin: "8px 0 16px", color: "#475569", fontSize: "13px", lineHeight: 1.45 }}>
+                Mostrale este QR al cliente. No necesita instalar nada ni ingresar su correo.
+              </p>
+              <img src={qrValoracion} alt="QR para valorar el trabajo" style={{ width: "250px", height: "250px", maxWidth: "100%", display: "block", margin: "0 auto" }} />
+              <p style={{ margin: "14px 0 0", color: "#166534", fontSize: "12px", fontWeight: "bold" }}>
+                Válido por 24 horas · se usa una sola vez
+              </p>
+              {venceValoracion ? (
+                <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: "11px" }}>
+                  Vence: {new Date(venceValoracion).toLocaleString("es-AR")}
+                </p>
+              ) : null}
+              <button type="button" onClick={() => setQrValoracion("")} style={{ marginTop: "18px", border: "1px solid #cbd5e1", borderRadius: "9px", background: "white", color: "#334155", padding: "9px 18px", fontWeight: "bold", cursor: "pointer" }}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        ) : null}
       </main>
     )
   }
