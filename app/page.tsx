@@ -45,16 +45,51 @@ type ResultadoLogin = {
 }
 
 function LogoInstitucional({ fondoOscuro = false }: { fondoOscuro?: boolean }) {
+  const [imagen, setImagen] = useState<string | null>(null)
   const [error, setError] = useState(false)
-  return !error ? (
+
+  useEffect(() => {
+    let activo = true
+    const clave = "renacli-logo-guardado-v1"
+    try {
+      const anterior = window.localStorage.getItem(clave)
+      if (anterior) setImagen(anterior)
+    } catch {
+      // El navegador puede impedir el almacenamiento.
+    }
+
+    async function actualizarLogo() {
+      try {
+        const respuesta = await fetch("/api/logo-renacli", { cache: "no-store" })
+        if (!respuesta.ok) throw new Error("No se pudo consultar el logo")
+        const blob = await respuesta.blob()
+        const lector = new FileReader()
+        lector.onload = () => {
+          const nuevo = typeof lector.result === "string" ? lector.result : null
+          if (!nuevo || !activo) return
+          setImagen(nuevo)
+          setError(false)
+          try { window.localStorage.setItem(clave, nuevo) } catch { /* almacenamiento lleno */ }
+        }
+        lector.readAsDataURL(blob)
+      } catch {
+        if (activo && !imagen) setError(true)
+      }
+    }
+    void actualizarLogo()
+    return () => { activo = false }
+  }, [])
+
+  return imagen ? (
     <img
-      src="https://www.renacli.com.ar/api/identidad/logo"
+      src={imagen}
       alt="RENACLI — Registro Nacional de Climatización y Refrigeración"
-      onError={() => setError(true)}
       style={{ display: "block", width: "min(100%, 300px)", maxHeight: "116px", height: "auto", objectFit: "contain", margin: "0 auto", padding: fondoOscuro ? "5px" : "0" }}
     />
   ) : (
-    <div style={{ fontWeight: 900, fontSize: "30px", color: fondoOscuro ? "#fff" : "#075985" }}>❄ RENACLI</div>
+    <div style={{ fontWeight: 900, fontSize: "30px", color: fondoOscuro ? "#fff" : "#075985" }}>
+      {error ? "RENACLI" : "❄ RENACLI"}
+    </div>
   )
 }
 
