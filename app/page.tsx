@@ -1199,7 +1199,9 @@ export default function HomePage() {
               "0 20px 60px rgba(15,23,42,0.18)",
           }}
         >
-          <LogoInstitucional />
+          <div style={{ background: "#0b3553", borderRadius: "16px", padding: "22px 14px", marginBottom: "22px", boxShadow: "0 8px 22px rgba(7,43,70,0.16)" }}>
+            <LogoInstitucional fondoOscuro />
+          </div>
 
           <p
             style={{
