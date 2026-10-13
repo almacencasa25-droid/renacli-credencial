@@ -44,6 +44,20 @@ type ResultadoLogin = {
   }
 }
 
+function LogoInstitucional({ fondoOscuro = false }: { fondoOscuro?: boolean }) {
+  const [error, setError] = useState(false)
+  return !error ? (
+    <img
+      src="https://www.renacli.com.ar/api/identidad/logo"
+      alt="RENACLI — Registro Nacional de Climatización y Refrigeración"
+      onError={() => setError(true)}
+      style={{ display: "block", width: "min(100%, 300px)", maxHeight: "116px", height: "auto", objectFit: "contain", margin: "0 auto", padding: fondoOscuro ? "5px" : "0" }}
+    />
+  ) : (
+    <div style={{ fontWeight: 900, fontSize: "30px", color: fondoOscuro ? "#fff" : "#075985" }}>❄ RENACLI</div>
+  )
+}
+
 const textoReglamento = `
 REGLAMENTO GENERAL RENACLI — Versión 1.1
 
@@ -1185,21 +1199,7 @@ export default function HomePage() {
               "0 20px 60px rgba(15,23,42,0.18)",
           }}
         >
-          <div
-            style={{
-              fontSize: "42px",
-            }}
-          >
-            ❄
-          </div>
-
-          <h1
-            style={{
-              marginBottom: "8px",
-            }}
-          >
-            RENACLI
-          </h1>
+          <LogoInstitucional />
 
           <p
             style={{
@@ -1308,36 +1308,7 @@ export default function HomePage() {
               color: "white",
             }}
           >
-            <div
-              style={{
-                fontSize: "34px",
-                lineHeight: 1,
-              }}
-            >
-              ❄
-            </div>
-
-            <h1
-              style={{
-                margin: "8px 0 2px 0",
-                fontSize: "31px",
-                letterSpacing: "1px",
-              }}
-            >
-              RENACLI
-            </h1>
-
-            <div
-              style={{
-                fontSize: "11px",
-                fontWeight: "bold",
-                letterSpacing: "0.7px",
-                opacity: 0.9,
-              }}
-            >
-              REGISTRO NACIONAL DE
-              CLIMATIZACIÓN Y REFRIGERACIÓN
-            </div>
+            <LogoInstitucional fondoOscuro />
 
             <div
               style={{
@@ -1864,7 +1835,7 @@ export default function HomePage() {
 
               {pasoBienvenida === 1 ? (
                 <>
-                  <div style={{ marginTop: "12px", fontSize: "38px" }}>❄</div>
+                  <div style={{ marginTop: "12px" }}><LogoInstitucional /></div>
                   <h2 style={{ margin: "8px 0 0", color: "#0f172a", fontSize: "23px" }}>
                     Tu credencial digital RENACLI
                   </h2>
@@ -2114,15 +2085,7 @@ export default function HomePage() {
               marginBottom: "20px",
             }}
           >
-            <div
-              style={{
-                fontSize: "36px",
-              }}
-            >
-              ❄
-            </div>
-
-            <h1>RENACLI</h1>
+            <LogoInstitucional />
 
             <p
               style={{
@@ -2442,15 +2405,7 @@ export default function HomePage() {
             marginBottom: "26px",
           }}
         >
-          <div
-            style={{
-              fontSize: "38px",
-            }}
-          >
-            ❄
-          </div>
-
-          <h1>RENACLI</h1>
+          <LogoInstitucional />
 
           <p
             style={{
