@@ -431,6 +431,12 @@ export default function HomePage() {
     setDispositivoListo,
   ] = useState(false)
 
+  const [mostrarInicio, setMostrarInicio] = useState(true)
+  useEffect(() => {
+    const temporizador = setTimeout(() => setMostrarInicio(false), 2500)
+    return () => clearTimeout(temporizador)
+  }, [])
+
   const [cargando, setCargando] = useState(false)
   const [guardando, setGuardando] = useState(false)
 
@@ -1173,7 +1179,8 @@ export default function HomePage() {
 
   if (
     comprobandoSesion ||
-    !dispositivoListo
+    !dispositivoListo ||
+    mostrarInicio
   ) {
     return (
       <main
